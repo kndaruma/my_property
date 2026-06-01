@@ -25,11 +25,19 @@ local function FormatVec3(vec)
     return vec
 end
 
+local function SyncHouseToAll(houseId)
+    if Houses[houseId] then
+        TriggerClientEvent('myproperty:syncSingleHouse', -1, houseId, Houses[houseId])
+    else
+        TriggerClientEvent('myproperty:removeHouse', -1, houseId)
+    end
+end
+
 -- =========================================================
 -- [2] DATABASE INITIALIZATION 
 -- =========================================================
 Citizen.CreateThread(function()
-    print("^3[MyProperty] Connecting to SQL Database...^7")
+    print("[MyProperty] Connecting to SQL Database...")
     MySQL.query('SELECT * FROM my_properties', {}, function(result)
         if result then
             for _, row in ipairs(result) do
@@ -60,7 +68,7 @@ Citizen.CreateThread(function()
                         end
                     end
                 end
-                print("^2[MyProperty] Successfully loaded " .. #result .. " properties and furniture.^7")
+                print("[MyProperty] Successfully loaded " .. #result .. " properties and furniture.")
             end)
         end
     end)
@@ -97,7 +105,7 @@ RegisterCommand('createhouse', function(source, args)
                 owner = cid, price = -1, furniture = {} 
             }
             nextHouseId = id + 1
-            TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+            SyncHouseToAll(id)
             TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'สร้างบ้านสำเร็จ! ID: ' .. id .. ' (คุณคือเจ้าของ)' } })
         end
     end)
@@ -118,7 +126,7 @@ RegisterCommand('setslots', function(source, args)
     if Houses[houseId] then
         Houses[houseId].maxSlots = newSlots
         MySQL.update('UPDATE my_properties SET max_slots = ? WHERE id = ?', {newSlots, houseId})
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'อัปเดตจำนวนช่องเฟอร์นิเจอร์บ้าน ID ' .. houseId .. ' เป็น ' .. newSlots .. ' ช่องเรียบร้อยแล้ว' } })
     else
         TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'ไม่พบบ้าน ID นี้ในระบบ!' } })
@@ -151,7 +159,7 @@ RegisterNetEvent('myproperty:confirmDeleteProperty', function(houseId)
             end
         end
         Houses[houseId] = nil
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'ลบบ้านถาวรสำเร็จ!' } })
     end
 end)
@@ -217,7 +225,7 @@ RegisterNetEvent('myproperty:giveKey', function(houseId, targetSrc)
     local name = Player.PlayerData.charinfo.firstname .. " " .. Player.PlayerData.charinfo.lastname
     Houses[houseId].keys[cid] = name
     SaveHouseColumn(houseId, 'keys', Houses[houseId].keys)
-    TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+    SyncHouseToAll(houseId)
     TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'มอบกุญแจให้ ' .. name } })
     TriggerClientEvent('chat:addMessage', targetSrc, { args = { '^2System', 'คุณได้รับกุญแจบ้าน ID: ' .. houseId } })
 end)
@@ -227,7 +235,7 @@ RegisterNetEvent('myproperty:removeKey', function(houseId, cid, name)
     if Houses[houseId] and Houses[houseId].keys[cid] then
         Houses[houseId].keys[cid] = nil
         SaveHouseColumn(houseId, 'keys', Houses[houseId].keys)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'ดึงกุญแจคืนจาก ' .. name } })
     end
 end)
@@ -240,7 +248,7 @@ RegisterNetEvent('myproperty:autoClaimOldHouse', function(houseId)
         local name = Player.PlayerData.charinfo.firstname .. " " .. Player.PlayerData.charinfo.lastname
         Houses[houseId].keys[cid] = name
         SaveHouseColumn(houseId, 'keys', Houses[houseId].keys)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', src, { args = { '^3System', 'รับสิทธิ์ครอบครองกุญแจบ้านอัตโนมัติ' } })
     end
 end)
@@ -249,7 +257,7 @@ RegisterNetEvent('myproperty:setTime', function(houseId, h, m)
     if Houses[houseId] then
         Houses[houseId].time = { h = h, m = m }
         SaveHouseColumn(houseId, 'time', Houses[houseId].time)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', source, { args = { '^2System', string.format('ล็อคเวลาบ้านเป็น %02d:%02d', h, m) } })
     end
 end)
@@ -258,7 +266,7 @@ RegisterNetEvent('myproperty:resetTime', function(houseId)
     if Houses[houseId] then
         Houses[houseId].time = nil
         SaveHouseColumn(houseId, 'time', nil)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', source, { args = { '^2System', 'รีเซ็ตเวลาบ้านตามเซิร์ฟเวอร์แล้ว' } })
     end
 end)
@@ -272,7 +280,7 @@ RegisterNetEvent('myproperty:addDoor', function(houseId, doorName, exitCoords)
         if exitCoords then formattedCoords = { x = exitCoords.x, y = exitCoords.y, z = exitCoords.z } end
         table.insert(Houses[houseId].doors, { name = doorName, entrance = nil, exit = formattedCoords, locked = false })
         SaveHouseColumn(houseId, 'doors', Houses[houseId].doors)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', source, { args = { '^2System', 'สร้างประตู [' .. doorName .. '] สำเร็จ!' } })
     end
 end)
@@ -283,7 +291,7 @@ RegisterNetEvent('myproperty:deleteDoor', function(houseId, doorName)
             if d.name == doorName then
                 table.remove(Houses[houseId].doors, i)
                 SaveHouseColumn(houseId, 'doors', Houses[houseId].doors)
-                TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+                SyncHouseToAll(houseId)
                 TriggerClientEvent('chat:addMessage', source, { args = { '^2System', 'ลบประตู [' .. doorName .. '] แล้ว!' } })
                 break
             end
@@ -297,7 +305,7 @@ RegisterNetEvent('myproperty:setExitCoords', function(houseId, doorName, coords)
             if d.name == doorName then
                 d.exit = { x = coords.x, y = coords.y, z = coords.z }
                 SaveHouseColumn(houseId, 'doors', Houses[houseId].doors)
-                TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+                SyncHouseToAll(houseId)
                 TriggerClientEvent('chat:addMessage', source, { args = { '^2System', 'ตั้งพิกัดจุดออกสำหรับ [' .. doorName .. ']' } })
                 break
             end
@@ -311,7 +319,7 @@ RegisterNetEvent('myproperty:setEntranceCoords', function(houseId, doorName, coo
             if d.name == doorName then
                 d.entrance = { x = coords.x, y = coords.y, z = coords.z }
                 SaveHouseColumn(houseId, 'doors', Houses[houseId].doors)
-                TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+                SyncHouseToAll(houseId)
                 TriggerClientEvent('chat:addMessage', source, { args = { '^2System', 'ตั้งพิกัดจุดเข้าสำหรับ [' .. doorName .. ']' } })
                 break
             end
@@ -326,7 +334,7 @@ RegisterNetEvent('myproperty:setDoorLock', function(houseId, doorName, state)
             if d.name == doorName then
                 d.locked = state
                 SaveHouseColumn(houseId, 'doors', Houses[houseId].doors)
-                TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+                SyncHouseToAll(houseId)
                 local statusMsg = d.locked and "^1ล็อค" or "^2ปลดล็อค"
                 TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ประตู [' .. doorName .. '] ตอนนี้ ' .. statusMsg } })
                 break
@@ -420,7 +428,7 @@ RegisterNetEvent('myproperty:createFirstFloorLift', function(houseId, coords)
     if Houses[houseId] then
         Houses[houseId].lifts = { { name = "1st Floor", dim = Houses[houseId].dimension, coords = coords } }
         SaveHouseColumn(houseId, 'lifts', Houses[houseId].lifts)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
     end
 end)
 RegisterNetEvent('myproperty:addLiftFloor', function(houseId, name)
@@ -428,21 +436,21 @@ RegisterNetEvent('myproperty:addLiftFloor', function(houseId, name)
         local newDim = (houseId * 100) + #Houses[houseId].lifts + 1
         table.insert(Houses[houseId].lifts, { name = name, dim = newDim, coords = nil })
         SaveHouseColumn(houseId, 'lifts', Houses[houseId].lifts)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
     end
 end)
 RegisterNetEvent('myproperty:updateLiftMarker', function(houseId, floorIndex, coords)
     if Houses[houseId] and Houses[houseId].lifts[floorIndex] then
         Houses[houseId].lifts[floorIndex].coords = coords
         SaveHouseColumn(houseId, 'lifts', Houses[houseId].lifts)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
     end
 end)
 RegisterNetEvent('myproperty:deleteLiftFloor', function(houseId, floorIndex)
     if Houses[houseId] and Houses[houseId].lifts[floorIndex] then
         table.remove(Houses[houseId].lifts, floorIndex)
         SaveHouseColumn(houseId, 'lifts', Houses[houseId].lifts)
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
     end
 end)
 RegisterNetEvent('myproperty:useElevator', function(houseId, targetDim, coords)
@@ -467,7 +475,7 @@ RegisterNetEvent('myproperty:sellProperty', function(houseId, price)
     if hasPerm then
         house.price = price
         MySQL.update('UPDATE my_properties SET price = ? WHERE id = ?', {price, houseId})
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ประกาศขายบ้านเรียบร้อยในราคา $' .. price } })
     else TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'คุณไม่ใช่เจ้าของบ้านหลังนี้!' } }) end
 end)
@@ -485,7 +493,7 @@ RegisterNetEvent('myproperty:cancelSell', function(houseId)
     if hasPerm then
         house.price = -1 
         MySQL.update('UPDATE my_properties SET price = -1 WHERE id = ?', {houseId})
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ยกเลิกการขายบ้านหลังนี้แล้ว' } })
     else TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'คุณไม่ใช่เจ้าของบ้านหลังนี้!' } }) end
 end)
@@ -524,7 +532,7 @@ RegisterNetEvent('myproperty:buyProperty', function(houseId)
         house.price = -1 
         house.keys = { [buyerCid] = buyerName }
         MySQL.update('UPDATE my_properties SET owner = ?, price = -1, keys = ? WHERE id = ?', {buyerCid, json.encode(house.keys), houseId})
-        TriggerClientEvent('myproperty:syncHouses', -1, Houses)
+        SyncHouseToAll(houseId)
         TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ยินดีด้วย! คุณซื้อบ้านหลังนี้เรียบร้อยแล้ว' } })
     else TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'เงินในธนาคารของคุณไม่พอ!' } }) end
 end)
@@ -533,19 +541,33 @@ end)
 -- [10] FURNITURE MANAGEMENT
 -- =========================================================
 RegisterNetEvent('myproperty:buyFurniture', function(hId, data)
-    if Houses[hId] then 
-        local formattedCoords, formattedRot = FormatVec3(data.coords), FormatVec3(data.rot)
-        local query = 'INSERT INTO my_property_furniture (id, house_id, name, model, price, coords, rot, no_collision, dimension) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        MySQL.insert(query, { data.id, hId, data.name, data.model, data.price or 0, json.encode(formattedCoords), json.encode(formattedRot), data.noCollision and 1 or 0, data.dimension })
-        
-        data.coords = formattedCoords 
-        data.rot = formattedRot
-        
-        -- ★ บรรทัดที่เพิ่มเข้ามา: บันทึกข้อมูลเฟอร์นิเจอร์ชิ้นใหม่เข้าสู่หน่วยความจำ (RAM) ของเซิร์ฟเวอร์
-        if not Houses[hId].furniture then Houses[hId].furniture = {} end
-        table.insert(Houses[hId].furniture, data)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    local price = data.price or 0
 
-        TriggerClientEvent('myproperty:syncSingleFurniture', -1, hId, data, "add") 
+    if Houses[hId] then 
+        -- ★ เช็คและหักเงินสด (cash) ถ้าเงินพอ หรือเป็นของแจกฟรี (price = 0) ถึงจะให้ทำรายการต่อ
+        if price <= 0 or Player.Functions.RemoveMoney('cash', price, "property-buy-furniture") then
+            local formattedCoords, formattedRot = FormatVec3(data.coords), FormatVec3(data.rot)
+            local query = 'INSERT INTO my_property_furniture (id, house_id, name, model, price, coords, rot, no_collision, dimension) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            MySQL.insert(query, { data.id, hId, data.name, data.model, price, json.encode(formattedCoords), json.encode(formattedRot), data.noCollision and 1 or 0, data.dimension })
+            
+            data.coords = formattedCoords 
+            data.rot = formattedRot
+            
+            if not Houses[hId].furniture then Houses[hId].furniture = {} end
+            table.insert(Houses[hId].furniture, data)
+            
+            TriggerClientEvent('myproperty:syncSingleFurniture', -1, hId, data, "add") 
+            
+            -- แจ้งเตือนเมื่อหักเงินสำเร็จ (ถ้ามีราคา)
+            if price > 0 then
+                TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ซื้อเฟอร์นิเจอร์สำเร็จ หักเงินสด $' .. price } })
+            end
+        else
+            -- ★ ถ้าเงินสดไม่พอ จะแจ้งเตือนผู้เล่นและไม่บันทึกเฟอร์นิเจอร์
+            TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'เงินสดของคุณไม่พอสำหรับซื้อเฟอร์นิเจอร์ชิ้นนี้!' } })
+        end
     end 
 end)
 
@@ -564,11 +586,23 @@ RegisterNetEvent('myproperty:updateFurniture', function(hId, fId, c, r, n)
 end)
 
 RegisterNetEvent('myproperty:deleteFurniture', function(hId, fId)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+
     if Houses[hId] then 
         for i, f in ipairs(Houses[hId].furniture) do 
             if tostring(f.id) == tostring(fId) then 
                 local removedItem = table.remove(Houses[hId].furniture, i)
-                MySQL.query('DELETE FROM my_property_furniture WHERE id = ? AND house_id = ?', {f.id, hId})
+                local price = removedItem.price or 0
+                
+                -- ★ เช็คราคา ถ้ามีราคามากกว่า 0 ให้คืนเงินสด (cash) ผู้เล่น
+                if Player and price > 0 then
+                    -- ถ้ายากให้ขายคืนแล้วโดนหักเปอร์เซ็นต์ (เช่น คืนแค่ 50%) ให้เปลี่ยน price เป็น math.floor(price * 0.5)
+                    Player.Functions.AddMoney('cash', price, "property-sell-furniture")
+                    TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ขายเฟอร์นิเจอร์สำเร็จ ได้รับเงินสดคืน $' .. price } })
+                end
+
+                MySQL.query('DELETE FROM my_property_furniture WHERE id = ? AND house_id = ?', {removedItem.id, hId})
                 TriggerClientEvent('myproperty:syncSingleFurniture', -1, hId, removedItem, "remove") 
                 break 
             end 
