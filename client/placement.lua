@@ -5,7 +5,7 @@ local placementMode = 'Moving'
 local speed = 0.05
 local currentItemData = nil
 local objectFrozen = false 
-local lastSpeedChange = 0 -- ★ แก้ไขตรงนี้: เพิ่มตัวแปรสำหรับใช้จับเวลา (Cooldown) ตอนกดปุ่มค้าง
+local lastSpeedChange = 0
 
 local function DrawText3DUI(text, x, y, scale)
     SetTextFont(4) 
@@ -29,11 +29,11 @@ local function DrawPlacementUI(coords, rot)
     DrawText3DUI("~y~Press [R] to change mode", xPos, startY + (spacing * line), 0.4); line = line + 1
     DrawText3DUI("Mode: ~y~" .. placementMode, xPos, startY + (spacing * line), 0.4); line = line + 1
     
-    -- ★ แก้ไขตรงนี้: เปลี่ยน %.3f เป็น %.4f เพื่อให้หน้าจอแสดงผลจุดทศนิยม 4 ตำแหน่ง (เช่น 0.0001)
+    -- แก้ไขตรงนี้เพื่อให้หน้าจอแสดงผลจุดทศนิยม (เช่น 0.0001)
     DrawText3DUI("Speed: ~y~" .. string.format("%.4f", speed), xPos, startY + (spacing * line), 0.4); line = line + 1
     
     DrawText3DUI("Speed Up/Down: ~y~[PageUp/PageDown]", xPos, startY + (spacing * line), 0.4); line = line + 1
-    DrawText3DUI("Speed Min/Max: ~y~[TAB]", xPos, startY + (spacing * line), 0.4); line = line + 1
+    DrawText3DUI("Speed Min/Max: ~y~[=]", xPos, startY + (spacing * line), 0.4); line = line + 1
     
     local freezeText = objectFrozen and "~g~Frozen (Player Can Move)" or "~r~Unfrozen (Object Can Move)"
     DrawText3DUI("Freeze/Unfreeze: ~y~[F]", xPos, startY + (spacing * line), 0.4); line = line + 1
@@ -115,7 +115,7 @@ AddEventHandler('myproperty:startPlacement', function(data)
             end
 
             if not objectFrozen then
-                -- ★ แก้ไขตรงนี้: เพิ่มระบบเช็คเวลา (Cooldown) เพื่อไม่ให้สปีดเพิ่มเร็วเกินไปตอนกดค้าง และเปลี่ยนสเต็ปการบวกลบเป็น 0.0001
+
                 local currentTime = GetGameTimer() 
                 
                 if (IsDisabledControlPressed(0, 10) or IsControlPressed(0, 10)) and (currentTime - lastSpeedChange > 50) then 
@@ -127,12 +127,11 @@ AddEventHandler('myproperty:startPlacement', function(data)
                     lastSpeedChange = currentTime
                 end 
                 
-                -- ★ แก้ไขตรงนี้: เมื่อกด TAB ให้สลับค่าต่ำสุดเป็น 0.0001
-                if IsDisabledControlJustPressed(0, 37) or IsControlJustPressed(0, 37) then
+                if IsDisabledControlJustPressed(0, 83) or IsControlJustPressed(0, 37) then
                     if speed >= 0.5 then speed = 0.0001 else speed = 0.5 end
                 end
                 
-                -- ★ แก้ไขตรงนี้: ตั้งค่าขีดจำกัดความเร็วต่ำสุดเป็น 0.0001
+                -- ตั้งค่าขีดจำกัดความเร็วต่ำสุดเป็น 0.0001
                 if speed < 0.0001 then speed = 0.0001 end
                 if speed > 2.0 then speed = 2.0 end
 
