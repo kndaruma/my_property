@@ -11,7 +11,7 @@
 
 setr game_enableDynamicDoorCreation "true"
 
-และสร้างโฟลเดอร์เปล่าและตั้งชื่อ Backup_property ด้วย
+และสร้างโฟลเดอร์เปล่าและตั้งชื่อ Backup_property ไว้ในโฟลเดอร์หลักของสคริปต์นี้ไว้ด้วยเพื่อ Backup ข้อมูลของแต่ละ Property
 
 ## 🌟 ฟีเจอร์หลักของสคริปต์ (Core Features)
 `Dimesion System (แยกมิติ):` ผู้เล่นแต่ละหลังจะอยู่ในมิติ `(Routing Bucket)` ของตัวเอง ทำให้สามารถสร้างบ้านทับที่กันได้โดยไม่รบกวนกัน
