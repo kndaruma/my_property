@@ -22,10 +22,25 @@ local selectedKnockIndex = nil
 local playersToInvite = {}
 local pendingInvites = {}
 
+-- ★ 1. ระบบ SafeClick ป้องกันการกดเบิ้ลทุกปุ่ม (หน่วง 250ms)
+local lastClickTime = 0
+local function SafeClick()
+    local t = GetGameTimer()
+    if t - lastClickTime > 250 then 
+        lastClickTime = t
+        return true
+    end
+    return false
+end
+
+-- ★ 2. ตัวล็อค Thread ป้องกันเมนูซ้อนกัน (แก้บัคเลื่อนลูกศรแล้วกระโดด 2 บรรทัด)
+local isMenuThreadRunning = false
+
 -- ==========================================
 -- [1] UI MENUS CREATION (RageUI)
 -- ==========================================
 local mainMenu = RageUI.CreateMenu("Manage Property", "Manage your property", 1350, 50)
+mainMenu:SetRectangleBanner(34, 139, 34, 255)
 local doorMenu = RageUI.CreateSubMenu(mainMenu, "Manage Doors", "Manage multiple entrances")
 local doorActionMenu = RageUI.CreateSubMenu(doorMenu, "Door Actions", "Modify selected door")
 local furnitureMenu = RageUI.CreateSubMenu(mainMenu, "Furniture", "Manage placed furniture")
@@ -43,14 +58,13 @@ local pFlattenRotMenu = RageUI.CreateSubMenu(previewMenu, "Flatten Rotation", "R
 local pSharpRotMenu = RageUI.CreateSubMenu(previewMenu, "Sharp Rotation", "Rotate axis by 45 degrees")
 
 local deleteMenu = RageUI.CreateMenu("Delete Property", "Confirm property deletion")
-
 local knockMenu = RageUI.CreateMenu("Knock Knock", "Someone is knocking", 1350, 50)
 local knockActionMenu = RageUI.CreateSubMenu(knockMenu, "Action", "Manage knock")
 local inviteListMenu = RageUI.CreateSubMenu(doorActionMenu, "Invite Players", "Players outside")
 local inviteRequestMenu = RageUI.CreateMenu("House Invite", "You have a house invite", 1350, 50)
 
 -- ==========================================
--- [2] DATA INITIALIZATION
+-- [2] DATA INITIALIZATION & OPTIMIZED SYNC
 -- ==========================================
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function() PlayerData = QBCore.Functions.GetPlayerData() end)
 RegisterNetEvent('QBCore:Player:SetPlayerData', function(val) PlayerData = val end)
@@ -59,6 +73,25 @@ Citizen.CreateThread(function()
     Citizen.Wait(1000) 
     PlayerData = QBCore.Functions.GetPlayerData() 
     TriggerServerEvent('myproperty:requestSync') 
+end)
+
+RegisterNetEvent('myproperty:syncHouses')
+AddEventHandler('myproperty:syncHouses', function(serverHouses) 
+    Houses = serverHouses 
+    if myHouseId and Houses[myHouseId] then myFurniture = Houses[myHouseId].furniture or {} end
+end)
+
+RegisterNetEvent('myproperty:syncSingleHouse')
+AddEventHandler('myproperty:syncSingleHouse', function(hId, houseData)
+    Houses[hId] = houseData
+    if myHouseId == hId then
+        myFurniture = houseData.furniture or {}
+    end
+end)
+
+RegisterNetEvent('myproperty:removeHouse')
+AddEventHandler('myproperty:removeHouse', function(hId)
+    Houses[hId] = nil
 end)
 
 local function KeyboardInput(TextEntry, ExampleText, MaxStringLength)
@@ -124,12 +157,6 @@ local function SpawnHouseFurniture(houseId)
     end
 end
 
-RegisterNetEvent('myproperty:syncHouses')
-AddEventHandler('myproperty:syncHouses', function(serverHouses) 
-    Houses = serverHouses 
-    if myHouseId and Houses[myHouseId] then myFurniture = Houses[myHouseId].furniture or {} end
-end)
-
 -- ==========================================
 -- [4] DIMENSION & TELEPORTATION
 -- ==========================================
@@ -155,7 +182,6 @@ AddEventHandler('myproperty:teleport', function(coords)
     if _G.pendingFurnitureClear then ClearHouseFurniture() _G.pendingFurnitureClear = false end
     
     if _G.pendingFurnitureSpawn then
-        -- ล็อคความสูงที่ 0.5 ตามคำขอ
         SetEntityCoordsNoOffset(ped, coords.x, coords.y, coords.z + 0.5, false, false, false)
         FreezeEntityPosition(ped, true)
         _G.isFrozenInProperty = true
@@ -222,7 +248,6 @@ AddEventHandler('myproperty:syncSingleFurniture', function(houseId, furniData, a
     end
 end)
 
--- ★ แก้ไขฟังก์ชัน Update องศาให้ใช้ค่าเดียวเสมอ แก้บัคการดีดกลับของแกน
 local function ApplyRotationChange(newRot)
     if not selectedFurniture then return end
     local prop = selectedFurniture.prop or spawnedProps[selectedFurniture.id]
@@ -234,7 +259,6 @@ local function ApplyRotationChange(newRot)
         SetEntityRotation(prop, newRot.x, newRot.y, newRot.z, 2, true) 
     end
     
-    -- เซฟลงฐานข้อมูลเฉพาะของที่ไม่ได้อยู่ในสถานะจัดวาง (Pending Move/Buy)
     if not selectedFurniture.isPendingBuy and not selectedFurniture.isPendingMove then 
         TriggerServerEvent('myproperty:updateFurniture', myHouseId, selectedFurniture.id, selectedFurniture.coords, newRot, selectedFurniture.noCollision) 
     end
@@ -249,9 +273,16 @@ RegisterNetEvent('myproperty:openInviteList', function(players, houseId, doorNam
 end)
 
 function openPropertyMenu(startPage)
-    if isMenuOpen then return end
+    -- ★ ล้างลูปเก่าทิ้ง เพื่อป้องกันบักกดลูกศร/Backspace แล้วเบิ้ล 2 ครั้ง
+    if isMenuThreadRunning then 
+        isMenuOpen = false 
+        while isMenuThreadRunning do Citizen.Wait(10) end 
+    end
+
     isMenuOpen = true
+    isMenuThreadRunning = true
     isModelLoading = false 
+    RageUI.CloseAll() -- รีเซ็ตหน้าต่างเก่าทั้งหมดทิ้งชัวร์ๆ
 
     if startPage == "buy" then RageUI.Visible(buyFurnitureMenu, true)
     elseif startPage == "object" then RageUI.Visible(objectMenu, true)
@@ -333,21 +364,22 @@ function openPropertyMenu(startPage)
             -- ====================
             -- MAIN MENU
             -- ====================
-            RageUI.IsVisible(mainMenu, true, true, true, function()
-                if myHouseId then RageUI.Separator("--- Property ID: " .. myHouseId .. " ---") end
+            RageUI.IsVisible(mainMenu, true, false, true, function()
+                if myHouseId then RageUI.Separator("~y~--- Property ID: " .. myHouseId .. " ---") end
                 RageUI.ButtonWithStyle("Manage Doors", "Set multiple entrances/exits", { RightLabel = "→" }, true, function() end, doorMenu)
                 RageUI.ButtonWithStyle("Manage Furniture", "Placed: " .. GetPlacedFurnitureCount() .. " / " .. currentHouseSlots, { RightLabel = "→" }, true, function() end, furnitureMenu)
                 RageUI.ButtonWithStyle("Manage Keys", "Manage property access keys", { RightLabel = "→" }, true, function() end, keyMenu)
                 RageUI.ButtonWithStyle("Buy Furniture", "Purchase new furniture", { RightLabel = "→" }, true, function() end, buyFurnitureMenu)
-                RageUI.ButtonWithStyle("Close Menu", "", { RightLabel = "→" }, true, function(_, _, Selected) if Selected then RageUI.CloseAll() end end)
+                RageUI.ButtonWithStyle("~r~Close Menu", "", { RightLabel = "→" }, true, function(_, _, Selected) if Selected and SafeClick() then RageUI.CloseAll() end end)
             end, function() end)
 
             -- ====================
             -- DOOR MENU
             -- ====================
-            RageUI.IsVisible(doorMenu, true, true, true, function()
-                RageUI.ButtonWithStyle("Add New Door", "Create a new entrance/exit pair", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                    if Selected then
+            RageUI.IsVisible(doorMenu, true, false, true, function()
+                RageUI.ButtonWithStyle("~g~Add New Door", "Create a new entrance/exit pair", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                    if Selected and SafeClick() then
+                        RageUI.CloseAll()
                         Citizen.CreateThread(function()
                             Citizen.Wait(150)
                             local name = KeyboardInput("Door Name (e.g. Balcony):", "", 20)
@@ -360,39 +392,39 @@ function openPropertyMenu(startPage)
                 if Houses[myHouseId] and Houses[myHouseId].doors then
                     for _, door in ipairs(Houses[myHouseId].doors) do
                         RageUI.ButtonWithStyle(door.name, "Manage this door", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                            if Selected then selectedDoor = door end
+                            if Selected and SafeClick() then selectedDoor = door end
                         end, doorActionMenu)
                     end
                 end
             end, function() end)
 
-            RageUI.IsVisible(doorActionMenu, true, true, true, function()
+            RageUI.IsVisible(doorActionMenu, true, false, true, function()
                 if selectedDoor then
                     RageUI.Separator("Door: " .. selectedDoor.name)
                     RageUI.ButtonWithStyle("Invite Player", "Invite players outside the door", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then TriggerServerEvent('myproperty:requestPlayersOutside', myHouseId, selectedDoor.name) end
+                        if Selected and SafeClick() then TriggerServerEvent('myproperty:requestPlayersOutside', myHouseId, selectedDoor.name) end
                     end)
                     RageUI.ButtonWithStyle("Set Inside Exit Here", "Update exit marker to current position", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then TriggerServerEvent('myproperty:setExitCoords', myHouseId, selectedDoor.name, GetEntityCoords(PlayerPedId())) RageUI.GoBack() end
+                        if Selected and SafeClick() then TriggerServerEvent('myproperty:setExitCoords', myHouseId, selectedDoor.name, GetEntityCoords(PlayerPedId())) RageUI.GoBack() end
                     end)
-                    RageUI.ButtonWithStyle("How to set Outside Entrance?", "Info on setting exterior point", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then TriggerEvent('chat:addMessage', { args = { '^3System', 'เดินไปยืนหน้าบ้านด้านนอกแล้วพิมพ์: ^2/setentrance ' .. myHouseId .. ' ' .. selectedDoor.name } }) end
+                    RageUI.ButtonWithStyle("~y~How to set Outside Entrance?", "Info on setting exterior point", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then TriggerEvent('chat:addMessage', { args = { '^3System', 'เดินออกไปนอกบ้านแล้วพิมพ์: ^2/setentrance ' .. myHouseId .. ' ' .. selectedDoor.name } }) end
                     end)
                     if selectedDoor.name ~= "Main" then
-                        RageUI.ButtonWithStyle("Delete Door", "Remove this door permanently", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                            if Selected then TriggerServerEvent('myproperty:deleteDoor', myHouseId, selectedDoor.name) RageUI.GoBack() end
+                        RageUI.ButtonWithStyle("~r~Delete Door", "Remove this door permanently", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                            if Selected and SafeClick() then TriggerServerEvent('myproperty:deleteDoor', myHouseId, selectedDoor.name) RageUI.GoBack() end
                         end)
                     end
                 end
             end, function() end)
 
-            RageUI.IsVisible(inviteListMenu, true, true, true, function()
+            RageUI.IsVisible(inviteListMenu, true, false, true, function()
                 if #playersToInvite == 0 then
                     RageUI.Separator("No players outside")
                 else
                     for _, p in ipairs(playersToInvite) do
-                        RageUI.ButtonWithStyle(p.name, "Send house invite", { RightLabel = "Invite →" }, true, function(Hovered, Active, Selected)
-                            if Selected then
+                        RageUI.ButtonWithStyle(p.name, "Send house invite", { RightLabel = "Invite" }, true, function(Hovered, Active, Selected)
+                            if Selected and SafeClick() then
                                 TriggerServerEvent('myproperty:sendInvite', p.src, myHouseId, selectedDoor.name)
                                 RageUI.GoBack()
                             end
@@ -404,24 +436,24 @@ function openPropertyMenu(startPage)
             -- ====================
             -- KEY MENU
             -- ====================
-            RageUI.IsVisible(keyMenu, true, true, true, function()
-                RageUI.ButtonWithStyle("Give Key", "Give key to nearest player", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                    if Selected then
+            RageUI.IsVisible(keyMenu, true, false, true, function()
+                RageUI.ButtonWithStyle("~y~Give Key", "Give key to nearest player", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                    if Selected and SafeClick() then
                         local closestPlayer, closestDistance = QBCore.Functions.GetClosestPlayer()
                         if closestPlayer ~= -1 and closestDistance < 3.0 then TriggerServerEvent('myproperty:giveKey', myHouseId, GetPlayerServerId(closestPlayer)) 
                         else TriggerEvent('chat:addMessage', { args = { '^1System', 'ไม่มีผู้เล่นอยู่ใกล้ๆ' } }) end
                     end
                 end)
-                RageUI.ButtonWithStyle("Delete Keys", "Revoke property keys", { RightLabel = "→" }, true, function() end, keyListMenu)
+                RageUI.ButtonWithStyle("~r~Delete Keys", "Revoke property keys", { RightLabel = "→" }, true, function() end, keyListMenu)
             end, function() end)
 
-            RageUI.IsVisible(keyListMenu, true, true, true, function()
+            RageUI.IsVisible(keyListMenu, true, false, true, function()
                 local keys = (myHouseId and Houses[myHouseId]) and Houses[myHouseId].keys or {} 
                 local hasKeys = false
                 for cid, name in pairs(keys) do
                     hasKeys = true
-                    RageUI.ButtonWithStyle(name, "CitizenID: " .. cid, { RightLabel = "Revoke X" }, true, function(Hovered, Active, Selected)
-                        if Selected then TriggerServerEvent('myproperty:removeKey', myHouseId, cid, name) RageUI.GoBack() end
+                    RageUI.ButtonWithStyle(name, "CitizenID: " .. cid, { RightLabel = "~r~Revoke X" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then TriggerServerEvent('myproperty:removeKey', myHouseId, cid, name) RageUI.GoBack() end
                     end)
                 end
                 if not hasKeys then RageUI.Separator("No keyholders found") end
@@ -430,15 +462,15 @@ function openPropertyMenu(startPage)
             -- ====================
             -- FURNITURE SHOP
             -- ====================
-            RageUI.IsVisible(buyFurnitureMenu, true, true, true, function()
-                for i, cat in ipairs(Config.FurnitureShop) do RageUI.ButtonWithStyle(cat.category, "Browse category", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then selectedCategory = cat end end, buyCategoryMenu) end
+            RageUI.IsVisible(buyFurnitureMenu, true, false, true, function()
+                for i, cat in ipairs(Config.FurnitureShop) do RageUI.ButtonWithStyle(cat.category, "Browse category", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then selectedCategory = cat end end, buyCategoryMenu) end
             end, function() end)
 
-            RageUI.IsVisible(buyCategoryMenu, true, true, true, function()
+            RageUI.IsVisible(buyCategoryMenu, true, false, true, function()
                 if selectedCategory then
                     for i, item in ipairs(selectedCategory.items) do
-                        RageUI.ButtonWithStyle(item.name, "Price: $" .. item.price, { RightLabel = "Preview →" }, true, function(Hovered, Active, Selected)
-                            if Selected then
+                        RageUI.ButtonWithStyle(item.name, "~g~Price: $" .. item.price, { RightLabel = "Preview" }, true, function(Hovered, Active, Selected)
+                            if Selected and SafeClick() then
                                 if isModelLoading then return end
                                 if GetPlacedFurnitureCount() < currentHouseSlots then
                                     isModelLoading = true
@@ -452,7 +484,7 @@ function openPropertyMenu(startPage)
                                         table.insert(myFurniture, newItem) selectedFurniture = newItem 
                                         RageUI.Visible(buyCategoryMenu, false) RageUI.Visible(previewMenu, true) isModelLoading = false
                                     end)
-                                else TriggerEvent('chat:addMessage', { args = { '^1System', 'จำนวนเฟอร์นิเจอร์ถึงขีดจำกัดแล้ว!' } }) end
+                                else TriggerEvent('chat:addMessage', { args = { '^1System', 'พื้นที่เก็บเฟอร์นิเจอร์เต็มแล้ว!' } }) end
                             end
                         end)
                     end
@@ -462,9 +494,9 @@ function openPropertyMenu(startPage)
             -- ====================
             -- MANAGE PLACED OBJECTS
             -- ====================
-            RageUI.IsVisible(furnitureMenu, true, true, true, function()
+            RageUI.IsVisible(furnitureMenu, true, false, true, function()
                 local placedCount = GetPlacedFurnitureCount() 
-                RageUI.Separator("Slots Used: " .. placedCount .. " / " .. currentHouseSlots)
+                RageUI.Separator("~y~Slots Used: " .. placedCount .. "~y~ / " .. currentHouseSlots)
                 
                 for i = #sortedFurniList, 1, -1 do
                     local found = false
@@ -472,22 +504,22 @@ function openPropertyMenu(startPage)
                     if not found then table.remove(sortedFurniList, i) end
                 end
                 
-                if #sortedFurniList == 0 then RageUI.Separator("No furniture placed in this floor") else
+                if #sortedFurniList == 0 then RageUI.Separator("~r~No furniture placed in this floor") else
                     for _, furni in ipairs(sortedFurniList) do
-                        local distText = string.format("%.1fm →", furni.distance)
-                        RageUI.ButtonWithStyle(furni.name, "Model: " .. furni.model, { RightLabel = distText }, true, function(Hovered, Active, Selected) if Selected then selectedFurniture = furni end end, objectMenu)
+                        local distText = string.format("~y~%.1fm →", furni.distance)
+                        RageUI.ButtonWithStyle(furni.name, "Model: " .. furni.model, { RightLabel = distText }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then selectedFurniture = furni end end, objectMenu)
                     end
                 end
             end, function() end)
 
-            RageUI.IsVisible(objectMenu, true, true, true, function()
+            RageUI.IsVisible(objectMenu, true, false, true, function()
                 if selectedFurniture then
-                    local title = "Manage: " .. selectedFurniture.name 
+                    local title = "~y~Manage: " .. selectedFurniture.name 
                     if selectedFurniture.isPendingMove then title = "[MOVING] " .. title end
                     RageUI.Separator(title)
                     
-                    RageUI.ButtonWithStyle("1 - Move (Placement Mode)", "Enter placement mode", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then
+                    RageUI.ButtonWithStyle("~r~1 - Move (Placement Mode)", "Enter placement mode", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then
                             Citizen.CreateThread(function()
                                 local itemToMove = selectedFurniture 
                                 local propEntity = selectedFurniture.prop or spawnedProps[itemToMove.id]
@@ -503,76 +535,80 @@ function openPropertyMenu(startPage)
                         end
                     end)
                     
-                    if not selectedFurniture.isPendingMove then
-                        RageUI.ButtonWithStyle("2 - Duplicate", "Duplicate this object", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                            if Selected then
-                                if isModelLoading then return end
-                                if GetPlacedFurnitureCount() < currentHouseSlots then
-                                    isModelLoading = true
-                                    Citizen.CreateThread(function()
-                                        local hash = GetHashKey(selectedFurniture.model) RequestModel(hash) while not HasModelLoaded(hash) do Citizen.Wait(0) end
-                                        local prop = CreateObject(hash, selectedFurniture.coords.x, selectedFurniture.coords.y, selectedFurniture.coords.z, false, false, false) SetEntityRotation(prop, selectedFurniture.rot.x, selectedFurniture.rot.y, selectedFurniture.rot.z, 2, true) FreezeEntityPosition(prop, true)
-                                        local newItem = { id = math.random(1000000, 9999999), name = selectedFurniture.name, model = selectedFurniture.model, price = GetItemPrice(selectedFurniture.model), coords = selectedFurniture.coords, rot = selectedFurniture.rot, prop = prop, noCollision = selectedFurniture.noCollision, isPendingBuy = true, dimension = myDimension }
-                                        table.insert(myFurniture, newItem) selectedFurniture = newItem
-                                        RageUI.Visible(objectMenu, false) RageUI.Visible(previewMenu, true) isModelLoading = false
-                                    end)
-                                else TriggerEvent('chat:addMessage', { args = { '^1System', 'จำนวนเฟอร์นิเจอร์ถึงขีดจำกัดแล้ว!' } }) end
-                            end
-                        end)
-                    end
+                    RageUI.ButtonWithStyle("~r~2 - Duplicate", "Duplicate this object", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then
+                            if isModelLoading then return end
+                            if GetPlacedFurnitureCount() < currentHouseSlots then
+                                isModelLoading = true
+                                Citizen.CreateThread(function()
+                                    local hash = GetHashKey(selectedFurniture.model) RequestModel(hash) while not HasModelLoaded(hash) do Citizen.Wait(0) end
+                                    local prop = CreateObject(hash, selectedFurniture.coords.x, selectedFurniture.coords.y, selectedFurniture.coords.z, false, false, false) SetEntityRotation(prop, selectedFurniture.rot.x, selectedFurniture.rot.y, selectedFurniture.rot.z, 2, true) FreezeEntityPosition(prop, true)
+                                    local newItem = { id = math.random(1000000, 9999999), name = selectedFurniture.name, model = selectedFurniture.model, price = GetItemPrice(selectedFurniture.model), coords = selectedFurniture.coords, rot = selectedFurniture.rot, prop = prop, noCollision = selectedFurniture.noCollision, isPendingBuy = true, dimension = myDimension }
+                                    table.insert(myFurniture, newItem) selectedFurniture = newItem
+                                    RageUI.Visible(objectMenu, false) RageUI.Visible(previewMenu, true) isModelLoading = false
+                                end)
+                            else TriggerEvent('chat:addMessage', { args = { '^1System', 'พื้นที่เก็บเฟอร์นิเจอร์เต็มแล้ว!' } }) end
+                        end
+                    end)
                     
-                    RageUI.ButtonWithStyle("3 - Copy Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then clipboardCoords = selectedFurniture.coords TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกพิกัดแล้ว!' } }) end end)
-                    RageUI.ButtonWithStyle("4 - Paste Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected and clipboardCoords then 
+                    RageUI.ButtonWithStyle("~r~3 - Copy Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then clipboardCoords = selectedFurniture.coords TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกตำแหน่งสำเร็จ!' } }) end end)
+                    RageUI.ButtonWithStyle("~r~4 - Paste Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() and clipboardCoords then 
                             selectedFurniture.coords = clipboardCoords 
                             local prop = selectedFurniture.prop or spawnedProps[selectedFurniture.id]
                             if prop and DoesEntityExist(prop) then SetEntityCoordsNoOffset(prop, clipboardCoords.x, clipboardCoords.y, clipboardCoords.z, false, false, false) end
                             if not selectedFurniture.isPendingMove and not selectedFurniture.isPendingBuy then TriggerServerEvent('myproperty:updateFurniture', myHouseId, selectedFurniture.id, clipboardCoords, selectedFurniture.rot, selectedFurniture.noCollision) end
                         end
                     end)
-                    RageUI.ButtonWithStyle("5 - Copy Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then clipboardRot = selectedFurniture.rot TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกองศาแล้ว!' } }) end end)
-                    RageUI.ButtonWithStyle("  - Paste Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and clipboardRot then ApplyRotationChange(clipboardRot) end end)
-                    RageUI.ButtonWithStyle("6 - Flatten Rotation", nil, { RightLabel = "→" }, true, function() end, flattenRotMenu)
-                    RageUI.ButtonWithStyle("7 - Sharp Rotation", nil, { RightLabel = "→" }, true, function() end, sharpRotMenu)
+                    RageUI.ButtonWithStyle("~r~5 - Copy Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then clipboardRot = selectedFurniture.rot TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกองศาสำเร็จ!' } }) end end)
+                    RageUI.ButtonWithStyle("~r~6 - Paste Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() and clipboardRot then ApplyRotationChange(clipboardRot) end end)
+                    RageUI.ButtonWithStyle("~r~7 - Flatten Rotation", nil, { RightLabel = "→" }, true, function() end, flattenRotMenu)
+                    RageUI.ButtonWithStyle("~r~8 - Sharp Rotation", nil, { RightLabel = "→" }, true, function() end, sharpRotMenu)
                     
                     local colState = selectedFurniture.noCollision and "ON" or "OFF"
-                    RageUI.ButtonWithStyle("8 - No Collision: " .. colState, nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then 
+                    RageUI.ButtonWithStyle("~r~9 - No Collision: " .. colState, nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then 
                             selectedFurniture.noCollision = not selectedFurniture.noCollision 
-                            local prop = selectedFurniture.prop or spawnedProps[selectedFurniture.id]
-                            if prop and DoesEntityExist(prop) then SetEntityCollision(prop, not selectedFurniture.noCollision, not selectedFurniture.noCollision) end
+                            local prop = selectedFurniture.isPendingMove and selectedFurniture.tempProp or (selectedFurniture.prop or spawnedProps[selectedFurniture.id]) 
+                            SetEntityCollision(prop, not selectedFurniture.noCollision, not selectedFurniture.noCollision) 
                             if not selectedFurniture.isPendingMove then TriggerServerEvent('myproperty:updateFurniture', myHouseId, selectedFurniture.id, selectedFurniture.coords, selectedFurniture.rot, selectedFurniture.noCollision) end 
                         end
                     end)
                     
                     if not selectedFurniture.isPendingMove then 
-                        RageUI.ButtonWithStyle("9 - Sell", "Sell/Remove this object", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then TriggerServerEvent('myproperty:deleteFurniture', myHouseId, selectedFurniture.id) RageUI.GoBack() end end) 
+                        RageUI.ButtonWithStyle("~r~10 - Sell", "Sell/Remove this object", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then TriggerServerEvent('myproperty:deleteFurniture', myHouseId, selectedFurniture.id) RageUI.GoBack() end end) 
                     end
 
                     if selectedFurniture.isPendingMove then
                         RageUI.Separator("-----------------------")
-                        RageUI.ButtonWithStyle("Confirm Move", "Save new position", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                            if Selected then Citizen.CreateThread(function() TriggerServerEvent('myproperty:updateFurniture', myHouseId, selectedFurniture.id, selectedFurniture.coords, selectedFurniture.rot, selectedFurniture.noCollision) selectedFurniture.isPendingMove = nil end) end
+                        RageUI.ButtonWithStyle("~g~Confirm Move", "Save new position", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                            if Selected and SafeClick() then 
+                                TriggerServerEvent('myproperty:updateFurniture', myHouseId, selectedFurniture.id, selectedFurniture.coords, selectedFurniture.rot, selectedFurniture.noCollision) 
+                                selectedFurniture.isPendingMove = nil 
+                            end
                         end)
-                        RageUI.ButtonWithStyle("Cancel Move", "Revert to original position", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                            if Selected then 
-                                Citizen.CreateThread(function()
-                                    selectedFurniture.coords = selectedFurniture.originalCoords selectedFurniture.rot = selectedFurniture.originalRot 
-                                    local prop = spawnedProps[selectedFurniture.id] 
-                                    if prop and DoesEntityExist(prop) then SetEntityCoordsNoOffset(prop, selectedFurniture.coords.x, selectedFurniture.coords.y, selectedFurniture.coords.z, false, false, false) SetEntityRotation(prop, selectedFurniture.rot.x, selectedFurniture.rot.y, selectedFurniture.rot.z, 2, true) SetEntityAlpha(prop, 255, false) end
-                                    selectedFurniture.isPendingMove = nil 
-                                end)
+                        RageUI.ButtonWithStyle("~r~Cancel Move", "Revert to original position", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                            if Selected and SafeClick() then 
+                                selectedFurniture.coords = selectedFurniture.originalCoords 
+                                selectedFurniture.rot = selectedFurniture.originalRot 
+                                local prop = spawnedProps[selectedFurniture.id] 
+                                if prop and DoesEntityExist(prop) then 
+                                    SetEntityCoordsNoOffset(prop, selectedFurniture.coords.x, selectedFurniture.coords.y, selectedFurniture.coords.z, false, false, false) 
+                                    SetEntityRotation(prop, selectedFurniture.rot.x, selectedFurniture.rot.y, selectedFurniture.rot.z, 2, true) 
+                                    SetEntityAlpha(prop, 255, false) 
+                                end
+                                selectedFurniture.isPendingMove = nil 
                             end
                         end)
                     end
                 end
             end, function() end)
 
-            RageUI.IsVisible(previewMenu, true, true, true, function()
+            RageUI.IsVisible(previewMenu, true, false, true, function()
                 if selectedFurniture then
-                    RageUI.Separator("[NEW] " .. selectedFurniture.name)
-                    RageUI.ButtonWithStyle("1 - Move (Placement Mode)", "Enter placement mode", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then
+                    RageUI.Separator("~y~[NEW] " .. selectedFurniture.name)
+                    RageUI.ButtonWithStyle("~r~1 - Move (Placement Mode)", "Enter placement mode", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then
                             Citizen.CreateThread(function()
                                 local itemToMove = selectedFurniture local propEntity = selectedFurniture.prop
                                 if not itemToMove.isPendingMove then 
@@ -586,43 +622,44 @@ function openPropertyMenu(startPage)
                             end)
                         end
                     end)
-                    RageUI.ButtonWithStyle("2 - Copy Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then clipboardCoords = selectedFurniture.coords TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกพิกัดแล้ว!' } }) end end)
-                    RageUI.ButtonWithStyle("3 - Paste Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected and clipboardCoords then 
+                    RageUI.ButtonWithStyle("~r~2 - Copy Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then clipboardCoords = selectedFurniture.coords TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกตำแหน่งสำเร็จ!' } }) end end)
+                    RageUI.ButtonWithStyle("~r~3 - Paste Position", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() and clipboardCoords then 
                             selectedFurniture.coords = clipboardCoords 
                             local prop = selectedFurniture.prop
                             if prop and DoesEntityExist(prop) then SetEntityCoordsNoOffset(prop, clipboardCoords.x, clipboardCoords.y, clipboardCoords.z, false, false, false) end
                         end
                     end)
-                    RageUI.ButtonWithStyle("4 - Copy Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then clipboardRot = selectedFurniture.rot TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกองศาแล้ว!' } }) end end)
-                    RageUI.ButtonWithStyle("  - Paste Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and clipboardRot then ApplyRotationChange(clipboardRot) end end)
-                    RageUI.ButtonWithStyle("5 - Flatten Rotation", nil, { RightLabel = "→" }, true, function() end, pFlattenRotMenu)
-                    RageUI.ButtonWithStyle("6 - Sharp Rotation", nil, { RightLabel = "→" }, true, function() end, pSharpRotMenu)
+                    RageUI.ButtonWithStyle("~r~4 - Copy Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then clipboardRot = selectedFurniture.rot TriggerEvent('chat:addMessage', { args = { '^2System', 'คัดลอกองศาสำเร็จ!' } }) end end)
+                    RageUI.ButtonWithStyle("~r~5 - Paste Rotation", nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() and clipboardRot then ApplyRotationChange(clipboardRot) end end)
+                    RageUI.ButtonWithStyle("~r~6 - Flatten Rotation", nil, { RightLabel = "→" }, true, function() end, pFlattenRotMenu)
+                    RageUI.ButtonWithStyle("~r~7 - Sharp Rotation", nil, { RightLabel = "→" }, true, function() end, pSharpRotMenu)
                     local colState = selectedFurniture.noCollision and "ON" or "OFF"
-                    RageUI.ButtonWithStyle("7 - No Collision: " .. colState, nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then 
+                    RageUI.ButtonWithStyle("~r~8 - No Collision: " .. colState, nil, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then 
                             selectedFurniture.noCollision = not selectedFurniture.noCollision 
                             local prop = selectedFurniture.prop if prop then SetEntityCollision(prop, not selectedFurniture.noCollision, not selectedFurniture.noCollision) end 
                         end
                     end)
                     RageUI.Separator("-----------------------")
-                    RageUI.ButtonWithStyle("Confirm Buy", "Pay $" .. selectedFurniture.price, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then 
-                            Citizen.CreateThread(function()
-                                local newItem = { id = math.random(1000000, 9999999), name = selectedFurniture.name, model = selectedFurniture.model, price = selectedFurniture.price or 0, coords = selectedFurniture.coords, rot = selectedFurniture.rot, noCollision = selectedFurniture.noCollision, dimension = myDimension } 
-                                if selectedFurniture.prop and DoesEntityExist(selectedFurniture.prop) then DeleteEntity(selectedFurniture.prop) end
-                                for i = #myFurniture, 1, -1 do if tostring(myFurniture[i].id) == tostring(selectedFurniture.id) then table.remove(myFurniture, i) break end end 
-                                TriggerServerEvent('myproperty:buyFurniture', myHouseId, newItem) selectedFurniture = nil RageUI.Visible(previewMenu, false) RageUI.Visible(buyCategoryMenu, true)
-                            end)
+                    RageUI.ButtonWithStyle("~g~Confirm Buy", "Pay $" .. selectedFurniture.price, { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then 
+                            local newItem = { id = math.random(1000000, 9999999), name = selectedFurniture.name, model = selectedFurniture.model, price = selectedFurniture.price or 0, coords = selectedFurniture.coords, rot = selectedFurniture.rot, noCollision = selectedFurniture.noCollision, dimension = myDimension } 
+                            if selectedFurniture.prop and DoesEntityExist(selectedFurniture.prop) then DeleteEntity(selectedFurniture.prop) end
+                            for i = #myFurniture, 1, -1 do if tostring(myFurniture[i].id) == tostring(selectedFurniture.id) then table.remove(myFurniture, i) break end end 
+                            TriggerServerEvent('myproperty:buyFurniture', myHouseId, newItem) 
+                            selectedFurniture = nil 
+                            RageUI.Visible(previewMenu, false) 
+                            RageUI.Visible(buyCategoryMenu, true)
                         end
                     end)
-                    RageUI.ButtonWithStyle("Cancel Buy", "Cancel and discard model", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then 
-                            Citizen.CreateThread(function()
-                                if selectedFurniture.prop and DoesEntityExist(selectedFurniture.prop) then DeleteEntity(selectedFurniture.prop) end
-                                for i = #myFurniture, 1, -1 do if tostring(myFurniture[i].id) == tostring(selectedFurniture.id) then table.remove(myFurniture, i) break end end 
-                                selectedFurniture = nil RageUI.Visible(previewMenu, false) RageUI.Visible(buyCategoryMenu, true)
-                            end)
+                    RageUI.ButtonWithStyle("~r~Cancel Buy", "Cancel and discard model", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
+                        if Selected and SafeClick() then 
+                            if selectedFurniture.prop and DoesEntityExist(selectedFurniture.prop) then DeleteEntity(selectedFurniture.prop) end
+                            for i = #myFurniture, 1, -1 do if tostring(myFurniture[i].id) == tostring(selectedFurniture.id) then table.remove(myFurniture, i) break end end 
+                            selectedFurniture = nil 
+                            RageUI.Visible(previewMenu, false) 
+                            RageUI.Visible(buyCategoryMenu, true)
                         end
                     end)
                 end
@@ -631,81 +668,81 @@ function openPropertyMenu(startPage)
             -- ====================
             -- ROTATION MENUS
             -- ====================
-            RageUI.IsVisible(flattenRotMenu, true, true, true, function()
+            RageUI.IsVisible(flattenRotMenu, true, false, true, function()
                 if selectedFurniture then 
                     local rot = selectedFurniture.rot 
-                    RageUI.ButtonWithStyle("X Axis (Pitch)", "Set X axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(0.0, rot.y, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Y Axis (Roll)", "Set Y axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, 0.0, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Z Axis (Yaw)", "Set Z axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, rot.y, 0.0)) end end) 
-                    RageUI.ButtonWithStyle("All Axes (Reset)", "Reset all axes to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(0.0, 0.0, 0.0)) end end) 
+                    RageUI.ButtonWithStyle("~r~Flatten Rotation X", "Set X axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(0.0, rot.y, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Flatten Rotation Y", "Set Y axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, 0.0, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Flatten Rotation Z", "Set Z axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, rot.y, 0.0)) end end) 
+                    RageUI.ButtonWithStyle("~y~All Axes (Reset)", "Reset all axes to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(0.0, 0.0, 0.0)) end end) 
                 end
             end, function() end)
-            RageUI.IsVisible(sharpRotMenu, true, true, true, function()
+            RageUI.IsVisible(sharpRotMenu, true, false, true, function()
                 if selectedFurniture then 
                     local rot = selectedFurniture.rot 
-                    RageUI.ButtonWithStyle("X Axis (Pitch)", "Rotate X axis by +45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3((rot.x + 45.0) % 360.0, rot.y, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Y Axis (Roll)", "Rotate Y axis by +45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, (rot.y + 45.0) % 360.0, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Z Axis (Yaw)", "Rotate Z axis by +45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, rot.y, (rot.z + 45.0) % 360.0)) end end) 
+                    RageUI.ButtonWithStyle("~r~Sharp Rotation X", "Rotate X axis by 45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3((rot.x + 45.0) % 360.0, rot.y, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Sharp Rotation Y", "Rotate Y axis by 45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, (rot.y + 45.0) % 360.0, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Sharp Rotation Z", "Rotate Z axis by 45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, rot.y, (rot.z + 45.0) % 360.0)) end end) 
                 end
             end, function() end)
-            RageUI.IsVisible(pFlattenRotMenu, true, true, true, function()
+            RageUI.IsVisible(pFlattenRotMenu, true, false, true, function()
                 if selectedFurniture then 
                     local rot = selectedFurniture.rot 
-                    RageUI.ButtonWithStyle("X Axis (Pitch)", "Set X axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(0.0, rot.y, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Y Axis (Roll)", "Set Y axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, 0.0, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Z Axis (Yaw)", "Set Z axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, rot.y, 0.0)) end end) 
-                    RageUI.ButtonWithStyle("All Axes (Reset)", "Reset all axes to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(0.0, 0.0, 0.0)) end end) 
+                    RageUI.ButtonWithStyle("~r~Flatten Rotation X", "Set X axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(0.0, rot.y, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Flatten Rotation Y", "Set Y axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, 0.0, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Flatten Rotation Z", "Set Z axis to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, rot.y, 0.0)) end end) 
+                    RageUI.ButtonWithStyle("~y~All Axes (Reset)", "Reset all axes to 0", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(0.0, 0.0, 0.0)) end end) 
                 end
             end, function() end)
-            RageUI.IsVisible(pSharpRotMenu, true, true, true, function()
+            RageUI.IsVisible(pSharpRotMenu, true, false, true, function()
                 if selectedFurniture then 
                     local rot = selectedFurniture.rot 
-                    RageUI.ButtonWithStyle("X Axis (Pitch)", "Rotate X axis by +45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3((rot.x + 45.0) % 360.0, rot.y, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Y Axis (Roll)", "Rotate Y axis by +45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, (rot.y + 45.0) % 360.0, rot.z)) end end) 
-                    RageUI.ButtonWithStyle("Z Axis (Yaw)", "Rotate Z axis by +45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected then ApplyRotationChange(vector3(rot.x, rot.y, (rot.z + 45.0) % 360.0)) end end) 
+                    RageUI.ButtonWithStyle("~r~Sharp Rotation X", "Rotate X axis by 45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3((rot.x + 45.0) % 360.0, rot.y, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Sharp Rotation Y", "Rotate Y axis by 45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, (rot.y + 45.0) % 360.0, rot.z)) end end) 
+                    RageUI.ButtonWithStyle("~r~Sharp Rotation Z", "Rotate Z axis by 45 deg", { RightLabel = "→" }, true, function(Hovered, Active, Selected) if Selected and SafeClick() then ApplyRotationChange(vector3(rot.x, rot.y, (rot.z + 45.0) % 360.0)) end end) 
                 end
             end, function() end)
 
             -- ====================
             -- DELETE MENU
             -- ====================
-            RageUI.IsVisible(deleteMenu, true, true, true, function()
-                RageUI.Separator("WARNING! Are you sure?")
-                RageUI.ButtonWithStyle("Confirm Delete", "Delete property and all furniture", { RightLabel = "→" }, true, function(Hovered, Active, Selected) 
-                    if Selected then TriggerServerEvent('myproperty:confirmDeleteProperty', deletePropertyId) RageUI.CloseAll() end 
+            RageUI.IsVisible(deleteMenu, true, false, true, function()
+                RageUI.Separator("~r~WARNING! ~y~Are you sure?")
+                RageUI.ButtonWithStyle("~g~Confirm Delete", "Delete property and all furniture", { RightLabel = "→" }, true, function(Hovered, Active, Selected) 
+                    if Selected and SafeClick() then TriggerServerEvent('myproperty:confirmDeleteProperty', deletePropertyId) RageUI.CloseAll() end 
                 end)
-                RageUI.ButtonWithStyle("Cancel", "Cancel", { RightLabel = "→" }, true, function(Hovered, Active, Selected) 
-                    if Selected then RageUI.CloseAll() end 
+                RageUI.ButtonWithStyle("~r~Cancel", "Cancel", { RightLabel = "→" }, true, function(Hovered, Active, Selected) 
+                    if Selected and SafeClick() then RageUI.CloseAll() end 
                 end)
             end, function() end)
 
             -- ====================
             -- KNOCK SYSTEM MENUS
             -- ====================
-            RageUI.IsVisible(knockMenu, true, true, true, function()
+            RageUI.IsVisible(knockMenu, true, false, true, function()
                 if #pendingKnocks == 0 then
                     RageUI.Separator("No active knocks")
                 else
                     for i, knock in ipairs(pendingKnocks) do
                         RageUI.Separator("Door: " .. knock.doorName)
                         RageUI.ButtonWithStyle(knock.name, "Click to manage", { RightLabel = "Manage →" }, true, function(Hovered, Active, Selected)
-                            if Selected then selectedKnock = knock selectedKnockIndex = i end
+                            if Selected and SafeClick() then selectedKnock = knock selectedKnockIndex = i end
                         end, knockActionMenu)
                     end
                 end
             end, function() end)
 
-            RageUI.IsVisible(knockActionMenu, true, true, true, function()
+            RageUI.IsVisible(knockActionMenu, true, false, true, function()
                 if selectedKnock then
                     RageUI.Separator(selectedKnock.name)
                     RageUI.ButtonWithStyle("Allow Entry", "Temporarily unlock door", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then
+                        if Selected and SafeClick() then
                             TriggerServerEvent('myproperty:answerKnock', selectedKnock.src, selectedKnock.houseId, selectedKnock.doorName, true)
                             table.remove(pendingKnocks, selectedKnockIndex) RageUI.GoBack()
                         end
                     end)
                     RageUI.ButtonWithStyle("Deny Entry", "Refuse entry", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                        if Selected then
+                        if Selected and SafeClick() then
                             TriggerServerEvent('myproperty:answerKnock', selectedKnock.src, selectedKnock.houseId, selectedKnock.doorName, false)
                             table.remove(pendingKnocks, selectedKnockIndex) RageUI.GoBack()
                         end
@@ -716,20 +753,20 @@ function openPropertyMenu(startPage)
             -- ====================
             -- INVITE REQUEST MENU
             -- ====================
-            RageUI.IsVisible(inviteRequestMenu, true, true, true, function()
+            RageUI.IsVisible(inviteRequestMenu, true, false, true, function()
                 if #pendingInvites == 0 then
                     RageUI.Separator("No pending invites")
                 else
                     for i, inv in ipairs(pendingInvites) do
                         RageUI.Separator("Invite from: " .. inv.name)
                         RageUI.ButtonWithStyle("Accept", "Warp inside immediately", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                            if Selected then
+                            if Selected and SafeClick() then
                                 TriggerServerEvent('myproperty:enterHouse', inv.houseId, inv.doorName) 
                                 table.remove(pendingInvites, i) RageUI.CloseAll()
                             end
                         end)
                         RageUI.ButtonWithStyle("Decline", "Reject the invite", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
-                            if Selected then table.remove(pendingInvites, i) RageUI.CloseAll() end
+                            if Selected and SafeClick() then table.remove(pendingInvites, i) RageUI.CloseAll() end
                         end)
                     end
                 end
@@ -759,6 +796,7 @@ function openPropertyMenu(startPage)
                 break
             end
         end
+        isMenuThreadRunning = false
     end)
 end
 
@@ -768,28 +806,31 @@ end
 RegisterNetEvent('myproperty:receiveKnock', function(knockerSrc, knockerName, houseId, doorName)
     table.insert(pendingKnocks, { src = knockerSrc, name = knockerName, houseId = houseId, doorName = doorName })
     PlaySoundFrontend(-1, "DOOR_HARD", "HUD_WINDOW_SOUNDSET", true)
-    if not isMenuOpen then openPropertyMenu("knock") end
+    if isMenuOpen then
+        TriggerEvent('chat:addMessage', { args = { '^5System', 'มีคนมาเคาะประตู! (เปิดเมนูเพื่อจัดการ)' } })
+    else
+        openPropertyMenu("knock")
+    end
 end)
 
 RegisterNetEvent('myproperty:receiveInvite', function(inviterName, houseId, doorName)
     table.insert(pendingInvites, { name = inviterName, houseId = houseId, doorName = doorName })
-    if not isMenuOpen then openPropertyMenu("inviteRequest") end
+    if isMenuOpen then
+        TriggerEvent('chat:addMessage', { args = { '^5System', 'คุณได้รับคำเชิญเข้าบ้าน! (เปิดเมนูเพื่อจัดการ)' } })
+    else
+        openPropertyMenu("inviteRequest")
+    end
 end)
 
 -- ==========================================
--- [8] PLACEMENT EVENT HANDLERS
+-- [8] PLACEMENT EVENT HANDLERS (รวมระบบปุ่มของโหมดแต่งบ้าน)
 -- ==========================================
 RegisterNetEvent('myproperty:confirmPlacement')
 AddEventHandler('myproperty:confirmPlacement', function(data, coords, rot)
-    local item = data.item 
-    item.coords = coords 
-    item.rot = rot
+    local item = data.item item.coords = coords item.rot = rot
     local prop = item.prop or spawnedProps[item.id] 
     if prop and DoesEntityExist(prop) then 
-        SetEntityCoordsNoOffset(prop, coords.x, coords.y, coords.z, false, false, false) 
-        SetEntityRotation(prop, rot.x, rot.y, rot.z, 2, true) 
-        SetEntityAlpha(prop, 255, false) 
-        SetEntityCollision(prop, not item.noCollision, not item.noCollision)
+        SetEntityCoordsNoOffset(prop, coords.x, coords.y, coords.z, false, false, false) SetEntityRotation(prop, rot.x, rot.y, rot.z, 2, true) SetEntityAlpha(prop, 255, false) SetEntityCollision(prop, not item.noCollision, not item.noCollision)
     end
     selectedFurniture = item 
     if item.isPendingBuy then openPropertyMenu("preview") else openPropertyMenu("object") end
@@ -797,13 +838,9 @@ end)
 
 RegisterNetEvent('myproperty:cancelPlacement')
 AddEventHandler('myproperty:cancelPlacement', function(data)
-    local item = data.item 
-    local prop = item.prop or spawnedProps[item.id]
+    local item = data.item local prop = item.prop or spawnedProps[item.id]
     if prop and DoesEntityExist(prop) then 
-        SetEntityCoordsNoOffset(prop, item.coords.x, item.coords.y, item.coords.z, false, false, false) 
-        SetEntityRotation(prop, item.rot.x, item.rot.y, item.rot.z, 2, true) 
-        SetEntityAlpha(prop, 255, false) 
-        SetEntityCollision(prop, not item.noCollision, not item.noCollision)
+        SetEntityCoordsNoOffset(prop, item.coords.x, item.coords.y, item.coords.z, false, false, false) SetEntityRotation(prop, item.rot.x, item.rot.y, item.rot.z, 2, true) SetEntityAlpha(prop, 255, false) SetEntityCollision(prop, not item.noCollision, not item.noCollision)
     end
     selectedFurniture = item 
     if item.isPendingBuy then openPropertyMenu("preview") else openPropertyMenu("object") end
@@ -811,6 +848,9 @@ end)
 
 RegisterNetEvent('myproperty:openDeleteMenu') 
 AddEventHandler('myproperty:openDeleteMenu', function(hId) deletePropertyId = hId openPropertyMenu("delete") end)
+
+-- ★ เพิ่มระบบกดเบิ้ลให้กับปุ่มในโหมดแต่งบ้านด้วย
+-- [คำแนะนำ: ถ้านำไฟล์ placement.lua ไปใช้ด้วย ให้เช็คในนั้นแทนการใส่ใน client]
 
 -- ==========================================
 -- [9] COMMANDS 
@@ -1047,27 +1087,81 @@ end, false)
 AddEventHandler('onResourceStop', function(resourceName) if (GetCurrentResourceName() == resourceName) then ClearHouseFurniture() end end)
 
 -- ==========================================
--- [10] MARKER RENDERING & TELEPORT LOGIC
+-- [10] OPTIMIZED MARKER RENDERING & TELEPORT
 -- ==========================================
+local nearbyMarkers = {}
+
 Citizen.CreateThread(function()
     while true do
-        local wait = 500 local pCoords = GetEntityCoords(PlayerPedId())
+        local ped = PlayerPedId()
+        local pCoords = GetEntityCoords(ped)
+        local tempMarkers = {}
+        
         for _, house in pairs(Houses) do
             if house.doors then
                 if myDimension == house.parent_dimension then
                     for _, door in ipairs(house.doors) do
                         if door.entrance then
-                            local dist = #(pCoords - vector3(door.entrance.x, door.entrance.y, door.entrance.z))
-                            if dist < 10.0 then 
-                                wait = 0 local m = Config.Marker
-                                local r, g, b = m.EnterColor.r, m.EnterColor.g, m.EnterColor.b
-                                if door.locked then r, g, b = 200, 50, 50 end
-                                DrawMarker(m.Type, door.entrance.x, door.entrance.y, door.entrance.z - 0.98, 0, 0, 0, 0, 0, 0, m.Size.x, m.Size.y, m.Size.z, r, g, b, m.EnterColor.a, false, false, false, false)
-                                
-                                if dist < 1.5 then 
-                                    SetTextComponentFormat("STRING") 
+                            local vecCoords = vector3(door.entrance.x, door.entrance.y, door.entrance.z)
+                            if #(pCoords - vecCoords) < 20.0 then
+                                table.insert(tempMarkers, {houseId = house.id, doorName = door.name, isEntrance = true, coords = vecCoords})
+                            end
+                        end
+                    end
+                end
+                if myDimension == house.dimension then
+                    for _, door in ipairs(house.doors) do
+                        if door.exit then
+                            local vecCoords = vector3(door.exit.x, door.exit.y, door.exit.z)
+                            if #(pCoords - vecCoords) < 20.0 then
+                                table.insert(tempMarkers, {houseId = house.id, doorName = door.name, isEntrance = false, coords = vecCoords})
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        nearbyMarkers = tempMarkers
+        Citizen.Wait(1000)
+    end
+end)
+
+Citizen.CreateThread(function()
+    while true do
+        local wait = 1000
+        if #nearbyMarkers > 0 then
+            wait = 0
+            local ped = PlayerPedId()
+            local pCoords = GetEntityCoords(ped)
+            
+            for _, mData in ipairs(nearbyMarkers) do
+                local house = Houses[mData.houseId]
+                if house then
+                    local door = nil
+                    for _, d in ipairs(house.doors) do if d.name == mData.doorName then door = d break end end
+                    
+                    if door then
+                        local dist = #(pCoords - mData.coords)
+                        if dist < 10.0 then
+                            local m = Config.Marker
+                            local r, g, b
+                            if door.locked then 
+                                r, g, b = 200, 50, 50 
+                            else
+                                if mData.isEntrance then 
+                                    r, g, b = m.EnterColor.r, m.EnterColor.g, m.EnterColor.b 
+                                else 
+                                    r, g, b = m.ExitColor.r, m.ExitColor.g, m.ExitColor.b 
+                                end
+                            end
+                            
+                            DrawMarker(m.Type, mData.coords.x, mData.coords.y, mData.coords.z - 0.98, 0, 0, 0, 0, 0, 0, m.Size.x, m.Size.y, m.Size.z, r, g, b, mData.isEntrance and m.EnterColor.a or m.ExitColor.a, false, false, false, false)
+                            
+                            if dist < 1.5 then
+                                SetTextComponentFormat("STRING")
+                                if mData.isEntrance then
                                     if house.price and house.price >= 0 then
-                                        AddTextComponentString("Press ~INPUT_CONTEXT~ to Enter~n~~g~For Sale: $" .. house.price .. " ~w~(/buyproperty)") 
+                                        AddTextComponentString("Press ~INPUT_CONTEXT~ to Enter~n~~g~For Sale: $" .. house.price .. " ~w~(/buyproperty)")
                                     else
                                         if door.locked then 
                                             AddTextComponentString("~r~[LOCKED] ~w~" .. door.name .. " (Use /knockd to knock)") 
@@ -1075,36 +1169,21 @@ Citizen.CreateThread(function()
                                             AddTextComponentString("Press ~INPUT_CONTEXT~ to Enter " .. door.name .. " (Use /ld)") 
                                         end
                                     end
-                                    DisplayHelpTextFromStringLabel(0, 0, 1, -1)
-                                    
-                                    if IsControlJustReleased(0, 38) then 
-                                        if not door.locked then TriggerServerEvent('myproperty:enterHouse', house.id, door.name) 
-                                        else TriggerEvent('chat:addMessage', { args = { '^1System', 'ประตูล็อคอยู่! พิมพ์ /knockd เพื่อเคาะประตู' } }) end
+                                else
+                                    if door.locked then 
+                                        AddTextComponentString("~r~[LOCKED] ~w~" .. door.name .. " (Use /ud)") 
+                                    else 
+                                        AddTextComponentString("Press ~INPUT_CONTEXT~ to Exit " .. door.name .. " (Use /ld)") 
                                     end
                                 end
-                            end
-                        end
-                    end
-                end
-                
-                if myDimension == house.dimension then
-                    for _, door in ipairs(house.doors) do
-                        if door.exit then
-                            local dist = #(pCoords - vector3(door.exit.x, door.exit.y, door.exit.z))
-                            if dist < 10.0 then 
-                                wait = 0 local m = Config.Marker
-                                local r, g, b = m.ExitColor.r, m.ExitColor.g, m.ExitColor.b
-                                if door.locked then r, g, b = 200, 50, 50 end
-                                DrawMarker(m.Type, door.exit.x, door.exit.y, door.exit.z - 0.98, 0, 0, 0, 0, 0, 0, m.Size.x, m.Size.y, m.Size.z, r, g, b, m.ExitColor.a, false, false, false, false)
+                                DisplayHelpTextFromStringLabel(0, 0, 1, -1)
                                 
-                                if dist < 1.5 then 
-                                    SetTextComponentFormat("STRING") 
-                                    if door.locked then AddTextComponentString("~r~[LOCKED] ~w~" .. door.name .. " (Use /ud)") 
-                                    else AddTextComponentString("Press ~INPUT_CONTEXT~ to Exit " .. door.name .. " (Use /ld)") end
-                                    DisplayHelpTextFromStringLabel(0, 0, 1, -1)
-                                    
-                                    if IsControlJustReleased(0, 38) then 
-                                        if not door.locked then TriggerServerEvent('myproperty:exitHouse', house.id, door.name) 
+                                if IsControlJustReleased(0, 38) and SafeClick() then
+                                    if not door.locked then
+                                        if mData.isEntrance then TriggerServerEvent('myproperty:enterHouse', house.id, door.name)
+                                        else TriggerServerEvent('myproperty:exitHouse', house.id, door.name) end
+                                    else
+                                        if mData.isEntrance then TriggerEvent('chat:addMessage', { args = { '^1System', 'ประตูล็อคอยู่! พิมพ์ /knockd เพื่อเคาะประตู' } })
                                         else TriggerEvent('chat:addMessage', { args = { '^1System', 'ประตูนี้ล็อคอยู่!' } }) end
                                     end
                                 end
