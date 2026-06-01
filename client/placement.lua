@@ -41,42 +41,60 @@ local function DrawText3DUI(text, x, y, scale)
     DrawText(x, y)
 end
 
-local function DrawPlacementUI()
-    local startY = 0.4
-    local spacing = 0.03 
-    local xPos = 0.2 
+local function formatCoord(val)
+    local rounded = math.floor((val * 1000) + 0.5) / 1000
+    if rounded % 1 == 0 then
+        return tostring(math.floor(rounded))
+    end
+    local str = string.format("%.3f", rounded)
+    return str:gsub("0+$", "") 
+end
+
+local function DrawPlacementUI(coords, rot)
+    local startY = 0.30
+    local spacing = 0.025 
+    local xPos = 0.20 
     local line = 0
 
-    DrawText3DUI("~g~Press R to change between rotate/move", xPos, startY + (spacing * line), 0.45); line = line + 1
+    DrawText3DUI("~g~Press R to change between rotate/move", xPos, startY + (spacing * line), 0.50); line = line + 1
     
     if placementMode == 'Moving' then
-        DrawText3DUI("~w~Moving", xPos, startY + (spacing * line), 0.45); line = line + 1
+        DrawText3DUI("~w~Moving", xPos, startY + (spacing * line), 0.42); line = line + 1
     else
-        DrawText3DUI("~w~Rotating", xPos, startY + (spacing * line), 0.45); line = line + 1
+        DrawText3DUI("~w~Rotating", xPos, startY + (spacing * line), 0.42); line = line + 1
     end
     
     local dispSpeed = math.floor((speed * 100) + 0.5) / 100
     local speedStr = (dispSpeed % 1 == 0) and tostring(math.floor(dispSpeed)) or string.format("%.2f", dispSpeed)
     
-    DrawText3DUI("~w~Speed: ~g~" .. speedStr, xPos, startY + (spacing * line), 0.45); line = line + 1
+    DrawText3DUI("~w~Speed: ~g~" .. speedStr, xPos, startY + (spacing * line), 0.42); line = line + 1
     
     if placementMode == 'Moving' then
-        DrawText3DUI("~w~Move: ~g~Arrows", xPos, startY + (spacing * line), 0.45); line = line + 1
-        DrawText3DUI("~w~Up/Down: ~g~W/S", xPos, startY + (spacing * line), 0.45); line = line + 1
+        DrawText3DUI("~w~Move: ~g~Arrows", xPos, startY + (spacing * line), 0.42); line = line + 1
+        DrawText3DUI("~w~Up/Down: ~g~W/S", xPos, startY + (spacing * line), 0.42); line = line + 1
     else
-        DrawText3DUI("~w~Rotate X: ~g~Up/Down", xPos, startY + (spacing * line), 0.45); line = line + 1
-        DrawText3DUI("~w~Rotate Y: ~g~W/S", xPos, startY + (spacing * line), 0.45); line = line + 1
-        DrawText3DUI("~w~Rotate Z: ~g~Left/Right", xPos, startY + (spacing * line), 0.45); line = line + 1
+        DrawText3DUI("~w~Rotate X: ~g~Up/Down", xPos, startY + (spacing * line), 0.42); line = line + 1
+        DrawText3DUI("~w~Rotate Y: ~g~W/S", xPos, startY + (spacing * line), 0.42); line = line + 1
+        DrawText3DUI("~w~Rotate Z: ~g~Left/Right", xPos, startY + (spacing * line), 0.42); line = line + 1
     end
     
-    DrawText3DUI("~w~Validate: ~g~Enter", xPos, startY + (spacing * line), 0.45); line = line + 1
-    DrawText3DUI("~w~Cancel: ~g~Delete / Backspace", xPos, startY + (spacing * line), 0.45); line = line + 1
-    DrawText3DUI("~w~Speed: ~g~PageUp/PageDown", xPos, startY + (spacing * line), 0.45); line = line + 1
-    DrawText3DUI("~w~Speed: ~g~[ / ]", xPos, startY + (spacing * line), 0.45); line = line + 1
-    DrawText3DUI("~w~Speed Min/Max: ~g~=", xPos, startY + (spacing * line), 0.45); line = line + 1
+    DrawText3DUI("~w~Validate: ~g~Enter", xPos, startY + (spacing * line), 0.42); line = line + 1
+    DrawText3DUI("~w~Cancel: ~g~Delete / Backspace", xPos, startY + (spacing * line), 0.42); line = line + 1
+    DrawText3DUI("~w~Speed: ~g~PageUp/PageDown", xPos, startY + (spacing * line), 0.42); line = line + 1
+    DrawText3DUI("~w~Speed (0.01): ~g~, / .", xPos, startY + (spacing * line), 0.42); line = line + 1
+    DrawText3DUI("~w~Speed Min/Max: ~g~[ / ]", xPos, startY + (spacing * line), 0.42); line = line + 1
     
     local freezeText = objectFrozen and "~g~Frozen" or "~w~Unfrozen"
-    DrawText3DUI("~w~Freeze/Unfreeze: ~g~F ~w~(" .. freezeText .. "~w~)", xPos, startY + (spacing * line), 0.45); line = line + 1
+    DrawText3DUI("~w~Freeze/Unfreeze: ~g~F ~w~(" .. freezeText .. "~w~)", xPos, startY + (spacing * line), 0.42); line = line + 1
+
+    local px, py, pz = formatCoord(coords.x), formatCoord(coords.y), formatCoord(coords.z)
+    local rx, ry, rz = formatCoord(rot.x), formatCoord(rot.y), formatCoord(rot.z)
+
+    line = line + 1 
+    DrawText3DUI("~g~Current Position:", xPos, startY + (spacing * line), 0.42); line = line + 1
+    DrawText3DUI(string.format("~g~X ~w~%s ~w~| ~g~Y ~w~%s ~w~| ~g~Z ~w~%s", px, py, pz), xPos, startY + (spacing * line), 0.42); line = line + 1
+    DrawText3DUI("~g~Current Rotation:", xPos, startY + (spacing * line), 0.42); line = line + 1
+    DrawText3DUI(string.format("~g~X ~w~%s ~w~| ~g~Y ~w~%s ~w~| ~g~Z ~w~%s", rx, ry, rz), xPos, startY + (spacing * line), 0.42); line = line + 1
 end
 
 RegisterNetEvent('myproperty:startPlacement')
@@ -101,7 +119,6 @@ AddEventHandler('myproperty:startPlacement', function(data)
 
     local ped = PlayerPedId()
     
-    -- ★ ตัวแปรเก็บพิกัดหลัก (Base Anchor) และระยะห่างที่เลื่อน (Local Offset)
     local baseCoords = vector3(data.item.coords.x, data.item.coords.y, data.item.coords.z)
     local currentCoords = baseCoords
     local currentRot = vector3(data.item.rot.x, data.item.rot.y, data.item.rot.z)
@@ -129,7 +146,7 @@ AddEventHandler('myproperty:startPlacement', function(data)
                 SetEntityNoCollisionEntity(ped, previewObj, true)
             end
 
-            DrawPlacementUI()
+            DrawPlacementUI(currentCoords, currentRot)
 
             if IsControlJustPressed(0, 49) or IsDisabledControlJustPressed(0, 49) then
                 objectFrozen = not objectFrozen
@@ -149,6 +166,7 @@ AddEventHandler('myproperty:startPlacement', function(data)
             if not objectFrozen then
                 local currentTime = GetGameTimer() 
                 
+                -- ★ Speed (+/- 0.5) : PageUp (10) / PageDown (11)
                 if (IsDisabledControlPressed(0, 10) or IsControlPressed(0, 10)) and (currentTime - lastSpeedChange > 100) then 
                     speed = speed + 0.5 
                     lastSpeedChange = currentTime
@@ -158,17 +176,23 @@ AddEventHandler('myproperty:startPlacement', function(data)
                     lastSpeedChange = currentTime
                 end 
 
-                if (IsDisabledControlPressed(0, 39) or IsControlPressed(0, 39)) and (currentTime - lastSpeedChange > 50) then 
+                -- ★ Speed ละเอียด (+/- 0.01) : . (81) / , (82)
+                if (IsDisabledControlPressed(0, 81) or IsControlPressed(0, 81)) and (currentTime - lastSpeedChange > 50) then 
                     speed = speed + 0.01 
                     lastSpeedChange = currentTime
                 end 
-                if (IsDisabledControlPressed(0, 40) or IsControlPressed(0, 40)) and (currentTime - lastSpeedChange > 50) then 
+                if (IsDisabledControlPressed(0, 82) or IsControlPressed(0, 82)) and (currentTime - lastSpeedChange > 50) then 
                     speed = speed - 0.01 
                     lastSpeedChange = currentTime
                 end 
                 
-                if IsDisabledControlJustPressed(0, 83) or IsControlJustPressed(0, 83) then
-                    if speed >= 5.0 then speed = 0.01 else speed = 10.0 end
+                -- ★ Speed Min (0.01) : [ (39)
+                if IsDisabledControlJustPressed(0, 39) or IsControlJustPressed(0, 39) then
+                    speed = 0.01
+                end
+                -- ★ Speed Max (10.0) : ] (40)
+                if IsDisabledControlJustPressed(0, 40) or IsControlJustPressed(0, 40) then
+                    speed = 10.0
                 end
                 
                 if speed < 0.01 then speed = 0.01 end
@@ -194,12 +218,10 @@ AddEventHandler('myproperty:startPlacement', function(data)
                     if IsDisabledControlPressed(0, 8) or IsControlPressed(0, 8) then zOff = -moveMultiplier; isMoved = true end 
 
                     if isMoved then
-                        -- ★ เก็บสะสมระยะห่างเท่านั้น
                         localOffsetX = localOffsetX + xOff
                         localOffsetY = localOffsetY + yOff
                         localOffsetZ = localOffsetZ + zOff
 
-                        -- ★ คำนวณพิกัดใหม่จากจุดเริ่มต้น (Base Anchor) เสมอ ทำให้ไม่มีการบวกเศษเพี้ยนเด็ดขาด
                         local right, fwd, up = GetVectorsFromRotation(currentRot)
                         currentCoords = baseCoords + (right * localOffsetX) + (fwd * localOffsetY) + (up * localOffsetZ)
                         
@@ -217,7 +239,6 @@ AddEventHandler('myproperty:startPlacement', function(data)
                     if IsDisabledControlPressed(0, 175) or IsControlPressed(0, 175) then rz = -rotMultiplier; isRotated = true end 
                     
                     if isRotated then
-                        -- ★ เมื่อมีการหมุนวัตถุ ให้ย้ายสมอ (Base Anchor) มาไว้ที่จุดปัจจุบันเพื่อเตรียมคำนวณใหม่
                         if localOffsetX ~= 0.0 or localOffsetY ~= 0.0 or localOffsetZ ~= 0.0 then
                             baseCoords = currentCoords
                             localOffsetX, localOffsetY, localOffsetZ = 0.0, 0.0, 0.0
