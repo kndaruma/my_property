@@ -144,6 +144,7 @@ end
 
 local function isDynamicProp(modelName)
     local name = string.lower(modelName)
+    if string.find(name, "doorwall") then return false end
     local keywords = {"door", "gate", "vault", "safe", "barrier", "shutter", "window", "turnstile", "cell", "cage"}
     for _, kw in ipairs(keywords) do if string.find(name, kw) then return true end end return false
 end
@@ -617,6 +618,12 @@ function openPropertyMenu(startPage)
                                 Citizen.CreateThread(function()
                                     local hash = GetHashKey(selectedFurniture.model) RequestModel(hash) while not HasModelLoaded(hash) do Citizen.Wait(0) end
                                     local prop = CreateObject(hash, selectedFurniture.coords.x, selectedFurniture.coords.y, selectedFurniture.coords.z, false, false, false) SetEntityRotation(prop, selectedFurniture.rot.x, selectedFurniture.rot.y, selectedFurniture.rot.z, 2, true) FreezeEntityPosition(prop, true)
+
+                                    SetEntityCoordsNoOffset(prop, selectedFurniture.coords.x, selectedFurniture.coords.y, selectedFurniture.coords.z, false, false, false)
+                                    
+                                    SetEntityRotation(prop, selectedFurniture.rot.x, selectedFurniture.rot.y, selectedFurniture.rot.z, 2, true) 
+                                    FreezeEntityPosition(prop, true)
+
                                     local newItem = { id = math.random(1000000, 9999999), name = selectedFurniture.name, model = selectedFurniture.model, price = GetItemPrice(selectedFurniture.model), coords = selectedFurniture.coords, rot = selectedFurniture.rot, prop = prop, noCollision = selectedFurniture.noCollision, isPendingBuy = true, dimension = myDimension }
                                     table.insert(myFurniture, newItem) selectedFurniture = newItem
                                     RageUI.Visible(objectMenu, false) RageUI.Visible(previewMenu, true) isModelLoading = false
