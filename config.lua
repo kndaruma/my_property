@@ -3,21 +3,37 @@ Config = {}
 -- ★ ตั้งค่ารูปแบบวงวาร์ป (Marker) ★
 Config.Marker = {
     Type = 27, 
-    Size = vector3(1, 1, 0.25), -- ขนาดแกน X, Y, Z
+    Size = vector3(0.8, 0.8, 0.3), -- ขนาดแกน X, Y, Z
     
     -- สีของจุดทางเข้า (Entrance) (RGB + Alpha ความโปร่งใส)
     EnterColor = { r = 0, g = 200, b = 100, a = 150 }, 
     
     -- สีของจุดทางออก (Exit)
-    ExitColor = { r = 200, g = 50, b = 50, a = 150 }
+    ExitColor = { r = 0, g = 137, b = 255, a = 150 }
 }
 
+-- ==========================================
+-- [DYNAMIC DOORS WHITELIST] รายชื่อโมเดลประตูที่อยากให้มันสวิงได้
+-- ==========================================
+Config.DynamicDoors = {
+    "prop_bhhotel_door_l",
+    "prop_bhhotel_door_r",
+    "sm_14_mp_door_l",
+    "sm_14_mp_door_r",
+    "prop_sm1_11_doorl",
+    "prop_sm1_11_doorr",
+    -- เพิ่มชื่อโมเดลประตูอื่นๆ ตรงนี้ได้เลย
+}
+
+-- ==========================================
+-- [FURNITURE SHOP] แคตตาล็อกร้านค้าเฟอร์นิเจอร์
+-- ==========================================
 -- ตั้งค่าร้านค้าเฟอร์นิเจอร์ (แยกตามหมวดหมู่)
 Config.FurnitureShop = {
     {
         category = "Door", -- ชื่อหมวดหมู่
         items = {
-            { name = "prop_a_trailer_door_01", model = "prop_a_trailer_door_01", price = 5 },
+            { name = "prop_a_trailer_door_01", model = "prop_a_trailer_door_01", price = 5 }, -- สามารถเปลี่ยนชื่อที่โชว์ในร้านค้าได้
             { name = "prop_barn_door_l", model = "prop_barn_door_l", price = 5 },
             { name = "prop_barn_door_r", model = "prop_barn_door_r", price = 5 },
             { name = "prop_bh1_44_door_01l", model = "prop_bh1_44_door_01l", price = 5 },
@@ -183,6 +199,8 @@ Config.FurnitureShop = {
             { name = "ex_prop_door_lowbank_ent_r", model = "ex_prop_door_lowbank_ent_r", price = 5 },
             { name = "h4_prop_h4_door_01a", model = "h4_prop_h4_door_01a", price = 5 },
             { name = "hei_prop_heist_sec_door", model = "hei_prop_heist_sec_door", price = 5 },
+            { name = "sm_14_mp_door_l", model = "sm_14_mp_door_lr", price = 5 },
+            { name = "sm_14_mp_door_r", model = "sm_14_mp_door_r", price = 5 },
         }
     },
     {
