@@ -658,6 +658,11 @@ Citizen.CreateThread(function()
             local fileName = "Backup_property/Backup_Property_" .. tostring(houseId) .. ".json"
             SaveResourceFile(GetCurrentResourceName(), fileName, backupData, -1)
             count = count + 1
+            
+            -- พอเซฟครบทุกๆ 10 หลัง ให้เซิร์ฟเวอร์หยุดพักหายใจ 50ms ป้องกันเซิร์ฟเวอร์ค้าง
+            if count % 10 == 0 then
+                Citizen.Wait(50)
+            end
         end
         
         if count > 0 then
@@ -665,5 +670,181 @@ Citizen.CreateThread(function()
         end
         
         Citizen.Wait(2 * 60 * 60 * 1000) 
+    end
+end)
+
+-- ==========================================
+-- [RENT SYSTEM] ระบบเช่าบ้าน (คิดราคาต่อวัน)
+-- ==========================================
+RegisterNetEvent('myproperty:setRent', function(houseId, pricePerDay)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if not Houses[houseId] then return end
+    
+    if Houses[houseId].owner == Player.PlayerData.citizenid then
+        MySQL.update('UPDATE my_properties SET is_rentable = 1, rent_price_per_day = ? WHERE id = ?', {pricePerDay, houseId})
+        Houses[houseId].is_rentable = 1
+        Houses[houseId].rent_price_per_day = pricePerDay
+        TriggerClientEvent('myproperty:syncSingleHouse', -1, houseId, Houses[houseId])
+        TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ตั้งเปิดเช่าบ้านเรียบร้อย ราคา: $'..pricePerDay..' / วัน' } })
+    end
+end)
+
+RegisterNetEvent('myproperty:rentHouse', function(houseId, days)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if not Houses[houseId] then return end
+    
+    if Houses[houseId].is_rentable == 1 and not Houses[houseId].renter then
+        local pricePerDay = Houses[houseId].rent_price_per_day or 0
+        local totalCost = pricePerDay * days
+        
+        if Player.PlayerData.money['bank'] >= totalCost then
+            Player.Functions.RemoveMoney('bank', totalCost, 'rent-property')
+            
+            -- โอนเงินให้เจ้าของบ้าน
+            local ownerCid = Houses[houseId].owner
+            local OwnerPlayer = QBCore.Functions.GetPlayerByCitizenId(ownerCid)
+            if OwnerPlayer then
+                OwnerPlayer.Functions.AddMoney('bank', totalCost, 'property-rent-income')
+                TriggerClientEvent('chat:addMessage', OwnerPlayer.PlayerData.source, { args = { '^2System', 'มีผู้เช่าบ้านของคุณ ได้รับเงินเข้าธนาคาร $'..totalCost } })
+            else
+                local result = MySQL.query.await('SELECT money FROM players WHERE citizenid = ?', {ownerCid})
+                if result and result[1] then
+                    local money = json.decode(result[1].money)
+                    money.bank = money.bank + totalCost
+                    MySQL.update('UPDATE players SET money = ? WHERE citizenid = ?', {json.encode(money), ownerCid})
+                end
+            end
+            
+            local expireTime = os.time() + (days * 86400)
+            MySQL.update('UPDATE my_properties SET is_rentable = 0, renter = ?, rent_expire = ? WHERE id = ?', {Player.PlayerData.citizenid, expireTime, houseId})
+            
+            Houses[houseId].is_rentable = 0
+            Houses[houseId].renter = Player.PlayerData.citizenid
+            Houses[houseId].rent_expire = expireTime
+            
+            TriggerClientEvent('myproperty:syncSingleHouse', -1, houseId, Houses[houseId])
+            TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'เช่าบ้านสำเร็จ! สัญญาเช่าจำนวน '..days..' วัน (หักเงินธนาคาร $'..totalCost..')' } })
+        else
+            TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'เงินในธนาคารไม่พอ (ต้องการ $'..totalCost..')' } })
+        end
+    else
+        TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'บ้านหลังนี้ไม่ได้เปิดให้เช่า หรือมีคนเช่าไปแล้ว!' } })
+    end
+end)
+
+RegisterNetEvent('myproperty:payRent', function(houseId, extendDays)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if not Houses[houseId] then return end
+    
+    if Houses[houseId].renter == Player.PlayerData.citizenid then
+        local pricePerDay = Houses[houseId].rent_price_per_day or 0
+        local totalCost = pricePerDay * extendDays
+        
+        if Player.PlayerData.money['bank'] >= totalCost then
+            Player.Functions.RemoveMoney('bank', totalCost, 'extend-rent-property')
+            
+            -- โอนเงินให้เจ้าของบ้าน
+            local ownerCid = Houses[houseId].owner
+            local OwnerPlayer = QBCore.Functions.GetPlayerByCitizenId(ownerCid)
+            if OwnerPlayer then
+                OwnerPlayer.Functions.AddMoney('bank', totalCost, 'property-rent-income')
+            else
+                local result = MySQL.query.await('SELECT money FROM players WHERE citizenid = ?', {ownerCid})
+                if result and result[1] then
+                    local money = json.decode(result[1].money)
+                    money.bank = money.bank + totalCost
+                    MySQL.update('UPDATE players SET money = ? WHERE citizenid = ?', {json.encode(money), ownerCid})
+                end
+            end
+            
+            local newExpire = Houses[houseId].rent_expire + (extendDays * 86400)
+            MySQL.update('UPDATE my_properties SET rent_expire = ? WHERE id = ?', {newExpire, houseId})
+            
+            Houses[houseId].rent_expire = newExpire
+            TriggerClientEvent('myproperty:syncSingleHouse', -1, houseId, Houses[houseId])
+            TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ต่อสัญญาเช่า '..extendDays..' วันสำเร็จ! (หักเงินธนาคาร $'..totalCost..')' } })
+        else
+            TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'เงินในธนาคารไม่พอต่อสัญญา (ต้องการ $'..totalCost..')' } })
+        end
+    else
+        TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'คุณไม่ใช่ผู้เช่าบ้านหลังนี้!' } })
+    end
+end)
+
+-- ★ ลูปเช็คบ้านเช่าหมดอายุ (ตรวจทุกๆ 10 นาที)
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(10 * 60 * 1000) 
+        local currentTime = os.time()
+        for id, house in pairs(Houses) do
+            if house.renter and house.rent_expire and house.rent_expire > 0 then
+                if currentTime > house.rent_expire then
+                    MySQL.update('UPDATE my_properties SET renter = NULL, rent_expire = 0, is_rentable = 1 WHERE id = ?', {id})
+                    Houses[id].renter = nil
+                    Houses[id].rent_expire = 0
+                    Houses[id].is_rentable = 1
+                    TriggerClientEvent('myproperty:syncSingleHouse', -1, id, Houses[id])
+                end
+            end
+        end
+    end
+end)
+
+-- ==========================================
+-- [CANCEL RENT] ระบบยกเลิกการเช่า / เตะผู้เช่า
+-- ==========================================
+RegisterNetEvent('myproperty:cancelRent', function(houseId, isOwner)
+    local src = source
+    local Player = QBCore.Functions.GetPlayer(src)
+    if not Houses[houseId] then return end
+    
+    local cid = Player.PlayerData.citizenid
+    local house = Houses[houseId]
+    
+    if isOwner then
+        -- ★ กรณี Owner เป็นคนกดยกเลิก
+        if house.owner == cid then
+            if house.renter then
+                -- มีคนเช่าอยู่ -> เตะออก และปิดรับคนเช่า
+                MySQL.update('UPDATE my_properties SET renter = NULL, rent_expire = 0, is_rentable = 0 WHERE id = ?', {houseId})
+                house.renter = nil
+                house.rent_expire = 0
+                house.is_rentable = 0 
+                TriggerClientEvent('myproperty:syncSingleHouse', -1, houseId, house)
+                TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ยกเลิกสัญญาและเตะผู้เช่าออกเรียบร้อยแล้ว!' } })
+            else
+                -- ไม่มีคนเช่า แต่อยากยกเลิกป้ายประกาศ
+                MySQL.update('UPDATE my_properties SET is_rentable = 0 WHERE id = ?', {houseId})
+                house.is_rentable = 0
+                TriggerClientEvent('myproperty:syncSingleHouse', -1, houseId, house)
+                TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'ยกเลิกการประกาศให้เช่าบ้านเรียบร้อยแล้ว!' } })
+            end
+        else
+            TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'คุณไม่ใช่เจ้าของบ้านหลังนี้!' } })
+        end
+    else
+        -- ★ กรณี ผู้เช่า เป็นคนกดยกเลิก (คืนบ้าน)
+        if house.renter == cid then
+            -- คืนบ้าน -> ปล่อยว่าง และเปิดรับคนเช่าใหม่ต่อทันที
+            MySQL.update('UPDATE my_properties SET renter = NULL, rent_expire = 0, is_rentable = 1 WHERE id = ?', {houseId})
+            house.renter = nil
+            house.rent_expire = 0
+            house.is_rentable = 1 
+            TriggerClientEvent('myproperty:syncSingleHouse', -1, houseId, house)
+            TriggerClientEvent('chat:addMessage', src, { args = { '^2System', 'คุณได้ยกเลิกสัญญาเช่าและคืนบ้านหลังนี้แล้ว!' } })
+            
+            -- วาร์ปผู้เล่นออกมาหน้าบ้านถ้าอยู่ในบ้าน
+            local outCoords = house.doors[1].entrance
+            if outCoords then 
+                TriggerClientEvent('myproperty:teleport', src, outCoords) 
+                SetPlayerRoutingBucket(src, house.parent_dimension)
+                TriggerClientEvent('myproperty:syncDimension', src, house.parent_dimension)
+            end
+        else
+            TriggerClientEvent('chat:addMessage', src, { args = { '^1System', 'คุณไม่ได้เช่าบ้านหลังนี้อยู่!' } })
+        end
     end
 end)
