@@ -7,26 +7,26 @@ local currentItemData = nil
 local objectFrozen = false 
 local lastSpeedChange = 0 
 
+-- ★ OPTIMIZED: นำ Native Math มาไว้ใน Local (ประมวลผลไวกว่าใน 0ms loop)
+local math_abs, math_rad, math_sin, math_cos = math.abs, math.rad, math.sin, math.cos
+local math_floor = math.floor
+
 local function cleanTrig(val)
-    if math.abs(val) < 0.000001 then return 0.0 end
-    if math.abs(val - 1.0) < 0.000001 then return 1.0 end
-    if math.abs(val + 1.0) < 0.000001 then return -1.0 end
+    if math_abs(val) < 0.000001 then return 0.0 end
+    if math_abs(val - 1.0) < 0.000001 then return 1.0 end
+    if math_abs(val + 1.0) < 0.000001 then return -1.0 end
     return val
 end
 
 local function GetVectorsFromRotation(rot)
-    local radX = math.rad(rot.x)
-    local radY = math.rad(rot.y)
-    local radZ = math.rad(rot.z)
-    
-    local sX, cX = cleanTrig(math.sin(radX)), cleanTrig(math.cos(radX))
-    local sY, cY = cleanTrig(math.sin(radY)), cleanTrig(math.cos(radY))
-    local sZ, cZ = cleanTrig(math.sin(radZ)), cleanTrig(math.cos(radZ))
+    local radX, radY, radZ = math_rad(rot.x), math_rad(rot.y), math_rad(rot.z)
+    local sX, cX = cleanTrig(math_sin(radX)), cleanTrig(math_cos(radX))
+    local sY, cY = cleanTrig(math_sin(radY)), cleanTrig(math_cos(radY))
+    local sZ, cZ = cleanTrig(math_sin(radZ)), cleanTrig(math_cos(radZ))
     
     local right = vector3(cZ * cY - sZ * sX * sY, sZ * cY + cZ * sX * sY, -cX * sY)
     local fwd = vector3(-sZ * cX, cZ * cX, sX)
     local up = vector3(cZ * sY + sZ * sX * cY, sZ * sY - cZ * sX * cY, cX * cY)
-    
     return right, fwd, up
 end
 
@@ -42,10 +42,8 @@ local function DrawText3DUI(text, x, y, scale)
 end
 
 local function formatCoord(val)
-    local rounded = math.floor((val * 1000) + 0.5) / 1000
-    if rounded % 1 == 0 then
-        return tostring(math.floor(rounded))
-    end
+    local rounded = math_floor((val * 1000) + 0.5) / 1000
+    if rounded % 1 == 0 then return tostring(math_floor(rounded)) end
     local str = string.format("%.3f", rounded)
     return str:gsub("0+$", "") 
 end
@@ -64,8 +62,8 @@ local function DrawPlacementUI(coords, rot)
         DrawText3DUI("~w~Rotating", xPos, startY + (spacing * line), 0.42); line = line + 1
     end
     
-    local dispSpeed = math.floor((speed * 100) + 0.5) / 100
-    local speedStr = (dispSpeed % 1 == 0) and tostring(math.floor(dispSpeed)) or string.format("%.2f", dispSpeed)
+    local dispSpeed = math_floor((speed * 100) + 0.5) / 100
+    local speedStr = (dispSpeed % 1 == 0) and tostring(math_floor(dispSpeed)) or string.format("%.2f", dispSpeed)
     
     DrawText3DUI("~w~Speed: ~g~" .. speedStr, xPos, startY + (spacing * line), 0.42); line = line + 1
     
@@ -118,7 +116,6 @@ AddEventHandler('myproperty:startPlacement', function(data)
     while not HasModelLoaded(model) do Citizen.Wait(10) end
 
     local ped = PlayerPedId()
-    
     local baseCoords = vector3(data.item.coords.x, data.item.coords.y, data.item.coords.z)
     local currentCoords = baseCoords
     local currentRot = vector3(data.item.rot.x, data.item.rot.y, data.item.rot.z)
@@ -142,15 +139,10 @@ AddEventHandler('myproperty:startPlacement', function(data)
             Citizen.Wait(0)
             local ped = PlayerPedId()
             
-            if not canCollide then
-                SetEntityNoCollisionEntity(ped, previewObj, true)
-            end
-
+            if not canCollide then SetEntityNoCollisionEntity(ped, previewObj, true) end
             DrawPlacementUI(currentCoords, currentRot)
 
-            if IsControlJustPressed(0, 49) or IsDisabledControlJustPressed(0, 49) then
-                objectFrozen = not objectFrozen
-            end
+            if IsControlJustPressed(0, 49) or IsDisabledControlJustPressed(0, 49) then objectFrozen = not objectFrozen end
 
             if not objectFrozen then
                 _G.BlockPeditMove = true 
@@ -166,45 +158,20 @@ AddEventHandler('myproperty:startPlacement', function(data)
             if not objectFrozen then
                 local currentTime = GetGameTimer() 
                 
-                -- ★ Speed (+/- 0.5) : PageUp (10) / PageDown (11)
-                if (IsDisabledControlPressed(0, 10) or IsControlPressed(0, 10)) and (currentTime - lastSpeedChange > 100) then 
-                    speed = speed + 0.5 
-                    lastSpeedChange = currentTime
-                end 
-                if (IsDisabledControlPressed(0, 11) or IsControlPressed(0, 11)) and (currentTime - lastSpeedChange > 100) then 
-                    speed = speed - 0.5 
-                    lastSpeedChange = currentTime
-                end 
-
-                -- ★ Speed ละเอียด (+/- 0.01) : . (81) / , (82)
-                if (IsDisabledControlPressed(0, 81) or IsControlPressed(0, 81)) and (currentTime - lastSpeedChange > 50) then 
-                    speed = speed + 0.01 
-                    lastSpeedChange = currentTime
-                end 
-                if (IsDisabledControlPressed(0, 82) or IsControlPressed(0, 82)) and (currentTime - lastSpeedChange > 50) then 
-                    speed = speed - 0.01 
-                    lastSpeedChange = currentTime
-                end 
+                if (IsDisabledControlPressed(0, 10) or IsControlPressed(0, 10)) and (currentTime - lastSpeedChange > 100) then speed = speed + 0.5 lastSpeedChange = currentTime end 
+                if (IsDisabledControlPressed(0, 11) or IsControlPressed(0, 11)) and (currentTime - lastSpeedChange > 100) then speed = speed - 0.5 lastSpeedChange = currentTime end 
+                if (IsDisabledControlPressed(0, 81) or IsControlPressed(0, 81)) and (currentTime - lastSpeedChange > 50) then speed = speed + 0.01 lastSpeedChange = currentTime end 
+                if (IsDisabledControlPressed(0, 82) or IsControlPressed(0, 82)) and (currentTime - lastSpeedChange > 50) then speed = speed - 0.01 lastSpeedChange = currentTime end 
                 
-                -- ★ Speed Min (0.01) : [ (39)
-                if IsDisabledControlJustPressed(0, 39) or IsControlJustPressed(0, 39) then
-                    speed = 0.01
-                end
-                -- ★ Speed Max (10.0) : ] (40)
-                if IsDisabledControlJustPressed(0, 40) or IsControlJustPressed(0, 40) then
-                    speed = 10.0
-                end
-                
+                if IsDisabledControlJustPressed(0, 39) or IsControlJustPressed(0, 39) then speed = 0.01 end
+                if IsDisabledControlJustPressed(0, 40) or IsControlJustPressed(0, 40) then speed = 10.0 end
                 if speed < 0.01 then speed = 0.01 end
                 if speed > 10.0 then speed = 10.0 end
 
-                if IsDisabledControlJustPressed(0, 45) or IsControlJustPressed(0, 45) then 
-                    placementMode = (placementMode == 'Moving') and 'Rotating' or 'Moving'
-                end
+                if IsDisabledControlJustPressed(0, 45) or IsControlJustPressed(0, 45) then placementMode = (placementMode == 'Moving') and 'Rotating' or 'Moving' end
 
                 local frameTime = GetFrameTime()
-                local isMoved = false
-                local isRotated = false
+                local isMoved, isRotated = false, false
                 
                 if placementMode == 'Moving' then
                     local xOff, yOff, zOff = 0.0, 0.0, 0.0
@@ -221,10 +188,8 @@ AddEventHandler('myproperty:startPlacement', function(data)
                         localOffsetX = localOffsetX + xOff
                         localOffsetY = localOffsetY + yOff
                         localOffsetZ = localOffsetZ + zOff
-
                         local right, fwd, up = GetVectorsFromRotation(currentRot)
                         currentCoords = baseCoords + (right * localOffsetX) + (fwd * localOffsetY) + (up * localOffsetZ)
-                        
                         SetEntityCoordsNoOffset(previewObj, currentCoords.x, currentCoords.y, currentCoords.z, false, false, false)
                     end
                 else
@@ -243,7 +208,6 @@ AddEventHandler('myproperty:startPlacement', function(data)
                             baseCoords = currentCoords
                             localOffsetX, localOffsetY, localOffsetZ = 0.0, 0.0, 0.0
                         end
-
                         currentRot = currentRot + vector3(rx, ry, rz)
                         SetEntityRotation(previewObj, currentRot.x, currentRot.y, currentRot.z, 2, true)
                     end
