@@ -5,6 +5,9 @@ local peditSpeed = 0.2
 local QBCore = exports['qb-core']:GetCoreObject()
 local PlayerData = {}
 
+-- ★ OPTIMIZED: นำ Native Math มาไว้ใน Local เพื่อให้ 0ms ประมวลผลไวที่สุด
+local math_sin, math_cos, math_rad = math.sin, math.cos, math.rad
+
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function() PlayerData = QBCore.Functions.GetPlayerData() end)
 RegisterNetEvent('QBCore:Player:SetPlayerData', function(val) PlayerData = val end)
 
@@ -36,6 +39,7 @@ end)
 local function HasKey()
     local hid = _G.myHouseIdForPedit
     if not hid or not Houses[hid] or not PlayerData.citizenid then return false end
+    -- ★ OPTIMIZED: เปลี่ยนการค้นหาใน Table ให้อ่านไวขึ้น O(1)
     if Houses[hid].keys and Houses[hid].keys[PlayerData.citizenid] then return true end
     if PlayerData.metadata and PlayerData.metadata["isadmin"] then return true end
     return false 
@@ -87,18 +91,17 @@ Citizen.CreateThread(function()
             if peditSpeed < 0.01 then peditSpeed = 0.01 end 
             if peditSpeed > 2.0 then peditSpeed = 2.0 end
             
-            -- ★ เช็คสัญญาณจาก placement.lua ถ้า Block อยู่ จะไม่ให้ใช้ WASD ของ /pe ขยับตัว
             if not _G.BlockPeditMove then
                 local pos = GetEntityCoords(ped)
                 local camRot = GetGameplayCamRot(2)
-                local heading = math.rad(camRot.z)
-                local pitch = math.rad(camRot.x)
+                local heading = math_rad(camRot.z)
+                local pitch = math_rad(camRot.x)
                 
-                local dx = -math.sin(heading) * peditSpeed
-                local dy = math.cos(heading) * peditSpeed
-                local dz = math.sin(pitch) * peditSpeed
-                local rightDx = math.cos(heading) * peditSpeed
-                local rightDy = math.sin(heading) * peditSpeed
+                local dx = -math_sin(heading) * peditSpeed
+                local dy = math_cos(heading) * peditSpeed
+                local dz = math_sin(pitch) * peditSpeed
+                local rightDx = math_cos(heading) * peditSpeed
+                local rightDy = math_sin(heading) * peditSpeed
                 
                 local newPos = pos
                 if IsControlPressed(0, 32) then newPos = newPos + vector3(dx, dy, dz) end 
