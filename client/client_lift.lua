@@ -32,6 +32,7 @@ AddEventHandler('myproperty:syncDimension', function(dim)
     end
 end)
 
+-- ★ OPTIMIZED
 local function HasKey()
     if not myHouseId or not Houses[myHouseId] or not PlayerData.citizenid then return false end
     if Houses[myHouseId].keys and Houses[myHouseId].keys[PlayerData.citizenid] then return true end
@@ -57,7 +58,6 @@ local function openLiftMenu()
             local houseData = Houses[myHouseId] 
             if not houseData or not houseData.lifts then return end
             
-            -- 1. รายการชั้นแสดงบนสุดตามปกติ
             for i, floor in ipairs(houseData.lifts) do
                 local status = floor.coords and "" or "~r~[No Marker]"
                 RageUI.ButtonWithStyle(floor.name .. " " .. status, "Teleport to this floor", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
@@ -74,15 +74,12 @@ local function openLiftMenu()
                 end)
             end
             
-            -- 2. เมนูจัดการลิฟต์ (สำหรับคนมีกุญแจ)
             if HasKey() then
                 RageUI.Separator("--- Manage Lift ---")
                 RageUI.ButtonWithStyle("~g~+ Create New Floor", "Add a new dimension floor", { RightLabel = "→" }, true, function(Hovered, Active, Selected)
                     if Selected then
                         local name = KeyboardInput("Enter floor name (e.g. Basement):", "", 20)
-                        if name and name ~= "" then 
-                            TriggerServerEvent('myproperty:addLiftFloor', myHouseId, name) 
-                        end
+                        if name and name ~= "" then TriggerServerEvent('myproperty:addLiftFloor', myHouseId, name) end
                     end
                 end)
                 
@@ -105,12 +102,9 @@ local function openLiftMenu()
                 end
             end
 
-            -- ★ ย้าย Tickbox มาอยู่ล่างสุดของเมนูหลักตรงนี้ ★
             RageUI.Separator("-----------------------")
             RageUI.Checkbox("Show Lift Marker", "On/Off Marker", showLiftMarker, { Style = RageUI.CheckboxStyle.Tick }, function(Hovered, Selected, Active, Checked)
-                if Selected then
-                    showLiftMarker = Checked
-                end
+                if Selected then showLiftMarker = Checked end
             end)
             
         end, function() end)
@@ -171,18 +165,14 @@ Citizen.CreateThread(function()
                 
                 if dist < 5.0 then 
                     wait = 0
-
                     if showLiftMarker then 
                         DrawMarker(30, liftMarkerPos.x, liftMarkerPos.y, liftMarkerPos.z - 0.01, 0, 0, 0, 0, 0, 0, 0.60, 0.60, 0.80, 50, 150, 250, 150, false, false, false, false)
                     end
-                    
                     if dist < 1.5 then 
                         SetTextComponentFormat("STRING") 
                         AddTextComponentString("Press ~INPUT_CONTEXT~ to use Elevator") 
                         DisplayHelpTextFromStringLabel(0, 0, 1, -1)
-                        if IsControlJustReleased(0, 38) then 
-                            openLiftMenu() 
-                        end
+                        if IsControlJustReleased(0, 38) then openLiftMenu() end
                     end
                 end
             end
